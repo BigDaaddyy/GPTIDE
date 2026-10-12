@@ -1,0 +1,8 @@
+app/
+data/
+downloads/
+node_modules/
+runtime/
+test/smoke-result.txt
+example-project/test/smoke-result.txt
+*.log

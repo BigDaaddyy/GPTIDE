@@ -1,0 +1,11 @@
+{
+  "name": "gptide-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node tools/build.cjs",
+    "start": "node tools/launch.cjs",
+    "test": "node --test test/*.test.cjs",
+    "check": "node tools/check.cjs"
+  }
+}

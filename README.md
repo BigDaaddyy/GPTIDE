@@ -1,0 +1,33 @@
+# GptIDE
+
+基于 VSCodium / VS Code 开源构建的 Windows IDE。AI 聊天随软件内置，不需要用户安装插件。当前是对开源编辑器完整运行包的定制版本，尚非从 VS Code 源码重编译的独立分支。
+
+## 使用
+
+双击 `启动GptIDE.cmd`。在软件内选择 **文件 → 打开文件夹**，选项目目录，自动读取该项目上次的 GptIDE 聊天及匹配的 Cursor 历史。聊天下拉列表可切换对话，Ctrl+L 打开聊天。首次使用点击 ChatGPT 登录；本机已有有效 Codex 登录时会读取其登录状态。
+
+只支持 ChatGPT 会员认证，不配置 API Key，不自动切换 API 付费。会员额度与其他 Codex 使用共享，额度耗尽会显示后端错误；软件不会购买额度。模型来自官方返回的列表，首选 GPT-6.1 Sol。
+
+Agent 模式可以修改项目；Ask 模式使用只读沙盒。需要额外授权的操作会在 IDE 弹窗中显示。查看修改打开 Git 源代码管理；Git 差异功能需要项目已有仓库。
+
+## Cursor 历史
+
+启动或打开项目后，按完整目录路径匹配 `%APPDATA%/Cursor/User/workspaceStorage`，从 SQLite 快照读取 composer 和 bubble 数据，保留原文件。首次打开默认显示最近的一条；以后优先恢复 GptIDE 上次的对话。刷新可重新读取 Cursor 最近进度。
+
+Cursor 对话只能作为上下文迁移，不能恢复 Cursor 内部代理状态、未完成工具调用、检查点或隐藏的推理内容。首次在导入对话发送消息时，创建新的 Codex 对话；过长历史会提示并发送最近约 18 万字符，全部原文仍可查看。当前支持本机默认用户目录和显式自定义目录，多根工作区的项目根由首个打开的文件夹决定。
+
+## 构建和数据
+
+从 GitHub 克隆后，先安装 Node.js 24 或更新版本及 Codex，然后在项目根目录执行 `powershell -ExecutionPolicy Bypass -File tools/setup.ps1`。脚本下载固定版本的官方 VSCodium，验证 SHA-256，解压完整运行包并构建内置聊天。Git 仓库不包含大型第三方运行包、私人聊天数据和认证凭据。
+
+`npm run check`、`npm test`、`npm run build`。`app/` 包含完整 VSCodium 运行环境；`builtin/` 是内置聊天源码；`tools/` 是打包、启动和导入程序；`data/` 为本机编辑器设置及项目聊天。源码不包含登录凭据，Codex 自行管理 ChatGPT 登录。
+
+运行要求：Windows x64，本机有 Codex CLI / Codex 桌面应用。自动发现 `%LOCALAPPDATA%/OpenAI/Codex/bin/*/codex.exe`，也可以在设置里填写 `gptide.codexPath`。
+
+底座来源：https://github.com/VSCodium/vscodium/releases/tag/1.135.06055
+
+附带 `example-project/` 可体验打开文件夹自动恢复聊天。若打开 GptIDE 软件源码的整个根目录，VS Code 会把目录内的编辑器模块视作可被项目修改的代码，在未信任该目录时禁用模块；普通项目文件夹不受此影响。
+
+官方会员接入：https://learn.chatgpt.com/docs/app-server
+
+第三方许可随 `app/` 保留。此版本未实现 Cursor Tab 补全、语义索引或 Cursor 私有功能，不应被称为完整 Cursor 复刻。

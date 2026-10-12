@@ -1,0 +1,28 @@
+{
+  "name": "gptide-chat",
+  "displayName": "GptIDE 内置聊天",
+  "publisher": "gptide",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.100.0" },
+  "main": "./extension.cjs",
+  "capabilities": { "untrustedWorkspaces": { "supported": true }, "virtualWorkspaces": { "supported": false } },
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "gptide.open", "title": "GptIDE: 打开 AI 聊天" },
+      { "command": "gptide.login", "title": "GptIDE: 使用 ChatGPT 登录" },
+      { "command": "gptide.refresh", "title": "GptIDE: 重新读取项目进度" }
+    ],
+    "keybindings": [{ "command": "gptide.open", "key": "ctrl+l" }],
+    "viewsContainers": { "secondarySidebar": [{ "id": "gptide", "title": "GptIDE", "icon": "icon.svg" }] },
+    "views": { "gptide": [{ "id": "gptide.chat", "name": "AI 聊天", "type": "webview" }] },
+    "configuration": {
+      "title": "GptIDE",
+      "properties": {
+        "gptide.codexPath": { "type": "string", "default": "", "description": "可选：Codex 可执行文件位置。" },
+        "gptide.cursorUserPath": { "type": "string", "default": "", "description": "可选：Cursor/User 数据目录。默认自动检测。" },
+        "gptide.model": { "type": "string", "default": "gpt-6.1-sol", "description": "首选模型。只使用会员登录。" }
+      }
+    }
+  }
+}
