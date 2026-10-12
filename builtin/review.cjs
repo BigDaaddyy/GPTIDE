@@ -20,15 +20,17 @@ function readText(file) {
   return data.toString('utf8');
 }
 function snapshot(root, maximum = 2500) {
-  const files = new Map(); let limited = false;
-  const excluded = new Set(['.git', 'node_modules', 'app', 'data', 'downloads', 'runtime', 'dist', 'build', '.next', '.venv', '__pycache__']);
+  const files = new Map(); let limited = false, total = 0;
+  const excluded = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.venv', '__pycache__']);
+  const localRuntime = new Set();
+  try { if (JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).name === 'gptide-desktop') for (const name of ['app', 'data', 'downloads', 'runtime']) localRuntime.add(name); } catch {}
   function visit(folder) {
     for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
-      if (files.size >= maximum) { limited = true; return; }
+      if (files.size >= maximum || total >= 32 * 1024 * 1024) { limited = true; return; }
       if (entry.isSymbolicLink()) continue;
       const file = path.join(folder, entry.name);
-      if (entry.isDirectory()) { if (!excluded.has(entry.name)) visit(file); }
-      else if (entry.isFile()) { try { const value = readText(file); if (value !== undefined) files.set(key(file), value); } catch {} }
+      if (entry.isDirectory()) { if (!excluded.has(entry.name) && !(folder === root && localRuntime.has(entry.name))) visit(file); }
+      else if (entry.isFile()) { try { const value = readText(file); if (value !== undefined) { files.set(key(file), value); total += Buffer.byteLength(value || ''); } } catch {} }
     }
   }
   visit(root); return { files, limited };
@@ -36,8 +38,8 @@ function snapshot(root, maximum = 2500) {
 function collectChanges(root, baseline, candidates) {
   const result = [];
   for (const file of candidates.keys()) {
-    if (!within(root, file)) continue;
-    const absolute = path.resolve(file);
+    const absolute = path.resolve(root, file);
+    if (!within(root, absolute)) continue;
     const after = readText(absolute), before = baseline.files.get(key(absolute));
     if (after === undefined || before === after) continue;
     // A file absent from the snapshot can be newly created or excluded: only

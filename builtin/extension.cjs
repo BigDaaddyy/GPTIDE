@@ -52,7 +52,7 @@ class Chat {
       const attachment = { id: crypto.randomUUID(), path: editor.document.uri.fsPath, label: path.basename(editor.document.fileName) + (selected ? `:${editor.selection.start.line + 1}-${editor.selection.end.line + 1}` : ''), text: selected ? editor.document.getText(editor.selection) : editor.document.getText() };
       this.attachments.push(attachment);
     } else {
-      const files = await vscode.workspace.findFiles('**/*', '**/{.git,node_modules,app,data,downloads,runtime,dist,build,.venv}/**', 2000);
+      const files = await vscode.workspace.findFiles('**/*', '**/{.git,node_modules,dist,build,.next,.venv}/**', 2000);
       const picked = await vscode.window.showQuickPick(files.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { canPickMany: true, placeHolder: '搜索项目文件，作为上下文附到当前消息' });
       for (const item of picked || []) {
         if (!review.within(this.project, item.uri.fsPath)) continue;
