@@ -1,5 +1,6 @@
 const api = acquireVsCodeApi(), el = id => document.getElementById(id);
 const previous = api.getState() || {};
+const drafts = previous.drafts || {}; let draftKey, submittedDraft;
 let state = { busy: false, chats: [], messages: [] }, messageSignature = '', optionsSignature = '', reviewSignature = '';
 const post = (type, data = {}) => api.postMessage({ type, ...data });
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
@@ -62,6 +63,15 @@ function renderMessages(s) {
   el('scroll-bottom').hidden = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
 }
 function render(s) {
+  const nextKey = s.activeId || '__new__';
+  if (nextKey !== draftKey) {
+    if (draftKey !== undefined) drafts[draftKey] = el('input').value;
+    const transferring = s.busy && draftKey === '__new__' && submittedDraft !== undefined;
+    const nextDraft = transferring ? el('input').value : drafts[nextKey] || (draftKey === undefined ? previous.draft || '' : '');
+    if (transferring) drafts[draftKey] = '';
+    el('input').value = nextDraft;
+    draftKey = nextKey; resizeInput();
+  }
   renderMessages(s); state = s;
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
@@ -91,12 +101,12 @@ function render(s) {
   }
   if (!el('history-panel').hidden) renderHistory();
 }
-function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(64, el('input').scrollHeight)) + 'px'; api.setState({ draft: el('input').value, mode: el('mode').value }); }
-window.addEventListener('message', event => { if (event.data.type === 'state') render(event.data); if (event.data.type === 'sent') { el('input').value = ''; resizeInput(); } });
+function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(64, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; api.setState({ drafts, mode: el('mode').value }); }
+window.addEventListener('message', event => { if (event.data.type === 'state') render(event.data); if (event.data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { resizeInput(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
 el('input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!state.busy) el('send').click(); } };
-el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) post('send', { text, mode: el('mode').value }); };
+el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;

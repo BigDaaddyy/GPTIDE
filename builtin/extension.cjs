@@ -6,6 +6,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { Bridge, findCodex } = require('./bridge.cjs');
 const review = require('./review.cjs');
+const storage = require('./storage.cjs');
 const exec = promisify(execFile);
 
 class Chat {
@@ -19,8 +20,8 @@ class Chat {
     this.ready = this.load();
   }
   async load() {
-    if (this.stateFile && fs.existsSync(this.stateFile)) {
-      try { const state = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); this.chats = state.chats || []; this.activeId = state.activeId; this.model = state.model || this.model; this.effort = state.effort || 'medium'; this.mode = state.mode || 'agent'; this.hiddenCursorIds = state.hiddenCursorIds || []; } catch (e) { this.output.appendLine('本地历史读取失败：' + e.message); }
+    if (this.stateFile) {
+      try { const result = storage.read(this.stateFile), state = result.state || {}; this.chats = state.chats || []; this.activeId = state.activeId; this.model = state.model || this.model; this.effort = state.effort || 'medium'; this.mode = state.mode || 'agent'; this.hiddenCursorIds = state.hiddenCursorIds || []; if (result.recovered) this.historyWarning = '主历史损坏，已恢复上一份本地备份。'; } catch (e) { this.historyWarning = e.message; this.storageBlocked = true; this.output.appendLine('本地历史读取失败：' + e.message); }
     }
     await this.importCursor();
     if (!this.activeId || !this.chats.some(c => c.id === this.activeId)) this.activeId = this.chats[0]?.id;
@@ -38,10 +39,10 @@ class Chat {
     } catch (e) { this.importWarning = 'Cursor 历史未能读取：' + e.message; }
   }
   select(id) { this.activeId = id; const chat = this.chats.find(c => c.id === id); this.messages = chat?.messages || []; this.changes = chat?.changes || []; this.threadId = chat?.threadId; this.resumed = false; this.post(); }
-  save() { if (this.stateFile) { const temp = this.stateFile + '.tmp'; fs.writeFileSync(temp, JSON.stringify({ activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor') }), 'utf8'); fs.renameSync(temp, this.stateFile); } }
+  save() { if (this.stateFile && !this.storageBlocked) storage.write(this.stateFile, { activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor') }); }
   post() {
     const chat = this.chats.find(c => c.id === this.activeId);
-    this.view?.webview.postMessage({ type: 'state', project: this.project || '', status: this.status, warning: this.importWarning || '', busy: this.busy, messages: this.messages, activeId: this.activeId, source: chat?.source, chats: this.chats.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: (c.after || '').split('\n').length, removed: (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', project: this.project || '', status: this.status, warning: [this.historyWarning, this.importWarning].filter(Boolean).join('；'), busy: this.busy, messages: this.messages, activeId: this.activeId, source: chat?.source, chats: this.chats.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: (c.after || '').split('\n').length, removed: (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   async attachFiles(current = false) {
     if (!this.project || this.busy) return;
@@ -123,6 +124,7 @@ class Chat {
   async login() { await this.ready; const bridge = await this.connect(); const result = await bridge.call('account/login/start', { type: 'chatgpt' }); if (result.authUrl) await vscode.env.openExternal(vscode.Uri.parse(result.authUrl)); this.status = '请在浏览器完成 ChatGPT 登录'; this.post(); }
   async send(text, mode, attach) {
     await this.ready;
+    if (this.storageBlocked) throw new Error(this.historyWarning);
     if (this.busy || typeof text !== 'string' || !text.trim()) return;
     if (!['ask', 'agent', 'plan'].includes(mode)) throw new Error('未知工作模式');
     if (!this.project) throw new Error('请先打开项目文件夹');
