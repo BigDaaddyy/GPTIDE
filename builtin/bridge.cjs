@@ -35,7 +35,7 @@ class Bridge extends EventEmitter {
       clearTimeout(entry.timer); this.pending.delete(value.id);
       if (value.error) entry.reject(new Error(value.error.message)); else entry.resolve(value.result);
     });
-    await this.call('initialize', { clientInfo: { name: 'gptide_desktop', title: 'GptIDE', version: '0.1.0' } });
+    await this.call('initialize', { clientInfo: { name: 'gptide_desktop', title: 'GptIDE', version: require('./package.json').version } });
     this.send({ method: 'initialized', params: {} });
     return this;
   }
