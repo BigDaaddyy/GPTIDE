@@ -14,6 +14,13 @@ const manifestCache = path.join(root, 'data', 'user', 'CachedProfilesData', '__d
 if (fs.existsSync(manifestCache)) fs.unlinkSync(manifestCache);
 const user = path.join(root, 'data', 'user', 'User'); fs.mkdirSync(user, { recursive: true });
 const settingsFile = path.join(user, 'settings.json');
+// User-level defaults win over VS Code's numerous Ctrl+K chord prefixes.
+// Existing user customizations remain owned by the user.
+const keysFile = path.join(user, 'keybindings.json');
+if (!fs.existsSync(keysFile)) fs.writeFileSync(keysFile, JSON.stringify([
+  { key: 'ctrl+k', command: 'gptide.inlineEdit', when: 'editorTextFocus' },
+  { key: 'ctrl+shift+k', command: 'gptide.attachSelection', when: 'editorTextFocus' }
+], null, 2));
 if (!fs.existsSync(settingsFile)) fs.writeFileSync(settingsFile, JSON.stringify({
   'workbench.colorTheme': 'Default Light Modern',
   'workbench.startupEditor': 'none',

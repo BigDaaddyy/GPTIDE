@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "engines": { "vscode": "^1.100.0" },
   "main": "./extension.cjs",
   "capabilities": { "untrustedWorkspaces": { "supported": true }, "virtualWorkspaces": { "supported": false } },
@@ -13,10 +13,11 @@
       { "command": "gptide.login", "title": "GptIDE: 使用 ChatGPT 登录" },
       { "command": "gptide.refresh", "title": "GptIDE: 重新读取项目进度" },
       { "command": "gptide.attachSelection", "title": "GptIDE: 引用当前代码" },
+      { "command": "gptide.inlineEdit", "title": "GptIDE: 改写选中代码（Ctrl+K）" },
       { "command": "gptide.newChat", "title": "GptIDE: 新建对话" }
     ],
-    "keybindings": [{ "command": "gptide.open", "key": "ctrl+l" }, { "command": "gptide.attachSelection", "key": "ctrl+k", "when": "editorTextFocus" }, { "command": "gptide.newChat", "key": "ctrl+shift+l" }],
-    "menus": { "editor/context": [{ "command": "gptide.attachSelection", "group": "gptide" }] },
+    "keybindings": [{ "command": "gptide.open", "key": "ctrl+l" }, { "command": "gptide.inlineEdit", "key": "ctrl+k", "when": "editorTextFocus" }, { "command": "gptide.attachSelection", "key": "ctrl+shift+k", "when": "editorTextFocus" }, { "command": "gptide.newChat", "key": "ctrl+shift+l" }],
+    "menus": { "editor/context": [{ "command": "gptide.inlineEdit", "group": "gptide@1" }, { "command": "gptide.attachSelection", "group": "gptide@2" }] },
     "viewsContainers": { "secondarySidebar": [{ "id": "gptide", "title": "GptIDE", "icon": "icon.svg" }] },
     "views": { "gptide": [{ "id": "gptide.chat", "name": "AI 聊天", "type": "webview" }] },
     "configuration": {

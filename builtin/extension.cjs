@@ -7,6 +7,8 @@ const { promisify } = require('node:util');
 const { Bridge, findCodex } = require('./bridge.cjs');
 const review = require('./review.cjs');
 const storage = require('./storage.cjs');
+const inlineCore = require('./inline-core.cjs');
+const inlineAgent = require('./inline-agent.cjs');
 const exec = promisify(execFile);
 
 class Chat {
@@ -100,6 +102,37 @@ class Chat {
     const name = await vscode.window.showInputBox({ prompt: '对话名称', value: chat.name, validateInput: s => s.trim() ? null : '名称不能为空' });
     if (name) { chat.name = name.trim(); this.save(); this.post(); }
   }
+  async inlineEdit() {
+    await this.ready;
+    if (this.busy || this.inlineBusy) throw new Error('请等待当前任务完成后再改写选区。');
+    const editor = vscode.window.activeTextEditor, document = editor?.document;
+    if (!this.project || !document || document.uri.scheme !== 'file' || !review.within(this.project, document.uri.fsPath)) throw new Error('请先打开本项目中的代码文件。');
+    if (!vscode.workspace.isTrusted) throw new Error('请先信任此项目，再使用 Ctrl+K 改写。');
+    const range = new vscode.Range(editor.selection.start, editor.selection.end);
+    const snapshot = { file: document.uri.fsPath, language: document.languageId, version: document.version, text: document.getText(), start: document.offsetAt(range.start), end: document.offsetAt(range.end), eol: document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n' };
+    const instruction = await vscode.window.showInputBox({ title: 'GptIDE · Ctrl+K 改写代码', prompt: editor.selection.isEmpty ? '描述要在光标处生成的代码' : '描述要如何修改选中的代码', placeHolder: '例如：转换为 async 函数，保持现有行为', ignoreFocusOut: true, validateInput: value => !value.trim() ? '请输入修改要求' : value.length > 4000 ? '修改要求过长' : null });
+    if (!instruction) return;
+    if (this.busy || this.inlineBusy) throw new Error('已有任务开始，请等待完成。');
+    this.inlineBusy = true;
+    try {
+      const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GptIDE 正在改写选区', cancellable: true }, (_, token) => inlineAgent.generate({ executable: findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')), cwd: this.project, model: this.model, effort: this.effort, snapshot, instruction, token }));
+      const current = () => ({ text: document.getText(), version: document.version });
+      if (!inlineCore.unchanged(snapshot, current())) throw new Error('代码在生成期间发生变化，已放弃应用，避免覆盖你的修改。');
+      const proposed = inlineCore.proposal(snapshot, replacement);
+      if (proposed.text === snapshot.text) { vscode.window.showInformationMessage('模型未提出代码变化。'); return; }
+      const id = crypto.randomUUID(); this.contextBefore ||= new Map(); this.contextBefore.set(id + '-before', snapshot.text); this.contextBefore.set(id + '-after', proposed.text);
+      const before = vscode.Uri.parse('gptide-before:/' + id + '-before'), after = vscode.Uri.parse('gptide-before:/' + id + '-after');
+      await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(before), document.languageId);
+      await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(after), document.languageId);
+      await vscode.commands.executeCommand('vscode.diff', before, after, `${path.basename(document.fileName)} · Ctrl+K 修改预览`);
+      const answer = await vscode.window.showInformationMessage('检查差异后选择是否应用到原文件。', '应用修改', '放弃');
+      if (answer !== '应用修改') return;
+      if (!inlineCore.unchanged(snapshot, current())) throw new Error('原文件已有后续修改，无法安全应用。请重新生成。');
+      const edit = new vscode.WorkspaceEdit(); edit.replace(document.uri, range, proposed.replacement);
+      if (!await vscode.workspace.applyEdit(edit)) throw new Error('应用修改失败。');
+      await vscode.window.showTextDocument(document); vscode.window.showInformationMessage('已应用选区修改。Ctrl+Z 可撤销；保存文件由你决定。');
+    } finally { this.inlineBusy = false; }
+  }
   async deleteChat() {
     const chat = this.chats.find(c => c.id === this.activeId); if (!chat || this.busy) return;
     const answer = await vscode.window.showWarningMessage(chat.source === 'cursor' ? '从 GptIDE 隐藏此对话？Cursor 原记录会保留。' : '删除本地对话记录？', { modal: true }, '确认');
@@ -137,6 +170,7 @@ class Chat {
   async send(text, mode, attach) {
     await this.ready;
     if (this.storageBlocked) throw new Error(this.historyWarning);
+    if (this.inlineBusy) throw new Error('请先完成或放弃 Ctrl+K 修改预览。');
     if (this.busy || typeof text !== 'string' || !text.trim()) return;
     if (!['ask', 'agent', 'plan'].includes(mode)) throw new Error('未知工作模式');
     if (!this.project) throw new Error('请先打开项目文件夹');
@@ -266,6 +300,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; await chat.importCursor(); chat.select(chat.activeId); }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.contextBefore?.get(uri.path.slice(1)) || '' }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.inlineEdit', () => chat.inlineEdit().catch(error => vscode.window.showErrorMessage(error.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.newChat', () => { if (!chat.busy) { chat.select(null); chat.save(); vscode.commands.executeCommand('gptide.chat.focus'); } }));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.commands.executeCommand('workbench.action.reloadWindow')));
   vscode.commands.executeCommand('gptide.chat.focus');
