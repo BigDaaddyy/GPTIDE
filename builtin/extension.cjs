@@ -341,10 +341,21 @@ class Chat {
     try { return await this.connecting; } finally { this.connecting = null; }
   }
   async refreshAccount() {
-    const result = await this.bridge.call('account/read', { refreshToken: false });
+    const bridge = this.bridge, epoch = Symbol('account-refresh');
+    if (!bridge || this.invalidated) return;
+    this.accountRefreshEpoch = epoch;
+    const isCurrent = () => !this.invalidated && this.bridge === bridge && this.accountRefreshEpoch === epoch;
+    let result, models;
+    try {
+      result = await bridge.call('account/read', { refreshToken: false });
+      if (!isCurrent()) return;
+      if (result.account && !['chatgpt', 'chatgptAuthTokens'].includes(result.account.type)) {
+        this.account = { type: result.account.type, plan: result.account.planType }; this.status = '请使用 ChatGPT 登录；此软件不使用 API Key'; this.models = []; this.post(); return;
+      }
+      models = await bridge.call('model/list', { limit: 50, includeHidden: false });
+      if (!isCurrent()) return;
+    } catch (error) { if (isCurrent()) throw error; return; }
     this.account = result.account ? { type: result.account.type, plan: result.account.planType } : null;
-    if (this.account && !['chatgpt', 'chatgptAuthTokens'].includes(this.account.type)) { this.status = '请使用 ChatGPT 登录；此软件不使用 API Key'; this.models = []; this.post(); return; }
-    const models = await this.bridge.call('model/list', { limit: 50, includeHidden: false });
     this.models = models.data || [];
     if (this.models.length && !this.models.some(m => m.model === this.model)) this.model = this.models.find(m => m.model === 'gpt-6.1-sol')?.model || this.models.find(m => m.isDefault)?.model || this.models[0].model;
     const current = this.models.find(m => m.model === this.model);

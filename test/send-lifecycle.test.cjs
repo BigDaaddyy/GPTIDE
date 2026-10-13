@@ -16,6 +16,32 @@ function fixture() {
   Object.assign(chat, { ready: Promise.resolve(), project: process.cwd(), projectKey: 'project', activeId: 'one', chats: [record], openChatIds: ['one'], messages: record.messages, attachments: [], threadId: 'thread', resumed: true, account: { type: 'chatgpt' }, model: 'fixture', effort: 'medium', busy: false, post: () => {}, save: () => true, view: { webview: { postMessage: () => {} } }, drafts: { set: () => {} } });
   return chat;
 }
+test('account refresh keeps prior state until both responses arrive and discards a disconnected result', async () => {
+  const chat = fixture(); let finishModels; const calls = [];
+  chat.bridge = { call: async method => { calls.push(method); if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'plus' } }; return new Promise(resolve => { finishModels = resolve; }); } };
+  const pending = chat.refreshAccount(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(chat.account.plan, undefined); chat.bridge = null;
+  finishModels({ data: [{ model: 'old', isDefault: true }] }); await pending;
+  assert.equal(chat.model, 'fixture'); assert.equal(chat.account.plan, undefined); assert.deepEqual(calls, ['account/read', 'model/list']);
+});
+test('only the latest account refresh may publish account and model state', async () => {
+  const chat = fixture(); let firstRead, calls = 0, posts = 0; chat.post = () => posts++;
+  chat.bridge = { call: async method => {
+    calls++;
+    if (method === 'account/read' && calls === 1) return new Promise(resolve => { firstRead = resolve; });
+    return method === 'account/read' ? { account: { type: 'chatgpt', planType: 'plus' } } : { data: [{ model: 'new', isDefault: true, defaultReasoningEffort: 'high' }] };
+  } };
+  const old = chat.refreshAccount(); await chat.refreshAccount();
+  firstRead({ account: { type: 'chatgpt', planType: 'old' } }); await old;
+  assert.equal(chat.account.plan, 'plus'); assert.equal(chat.model, 'new'); assert.equal(chat.effort, 'high'); assert.equal(posts, 1); assert.equal(calls, 3);
+});
+test('stale account refresh errors cannot overwrite a new connection', async () => {
+  const chat = fixture(); let fail;
+  chat.bridge = { call: () => new Promise((resolve, reject) => { fail = reject; }) };
+  const old = chat.refreshAccount(); chat.bridge = { call: async () => { throw new Error('current failure'); } };
+  fail(new Error('old failure')); await old;
+  await assert.rejects(chat.refreshAccount(), /current failure/);
+});
 test('preparing a send locks its conversation and ignores duplicate send', async () => {
   const chat = fixture(); let finishConnect, calls = 0;
   chat.connect = () => new Promise(resolve => { finishConnect = resolve; });

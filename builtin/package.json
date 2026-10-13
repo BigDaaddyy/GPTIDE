@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "engines": {
     "vscode": "^1.100.0"
   },
