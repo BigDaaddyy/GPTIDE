@@ -21,7 +21,7 @@ class Chat {
   }
   async load() {
     if (this.stateFile) {
-      try { const result = storage.read(this.stateFile), state = result.state || {}; this.chats = state.chats || []; this.activeId = state.activeId; this.model = state.model || this.model; this.effort = state.effort || 'medium'; this.mode = state.mode || 'agent'; this.hiddenCursorIds = state.hiddenCursorIds || []; if (result.recovered) this.historyWarning = '主历史损坏，已恢复上一份本地备份。'; } catch (e) { this.historyWarning = e.message; this.storageBlocked = true; this.output.appendLine('本地历史读取失败：' + e.message); }
+      try { const result = storage.read(this.stateFile), state = result.state || {}; this.storageRevision = result.revision; this.chats = state.chats || []; this.activeId = state.activeId; this.model = state.model || this.model; this.effort = state.effort || 'medium'; this.mode = state.mode || 'agent'; this.hiddenCursorIds = state.hiddenCursorIds || []; if (result.recovered) this.historyWarning = '主历史损坏，已恢复上一份本地备份。'; } catch (e) { this.historyWarning = e.message; this.storageBlocked = true; this.output.appendLine('本地历史读取失败：' + e.message); }
     }
     await this.importCursor();
     if (!this.activeId || !this.chats.some(c => c.id === this.activeId)) this.activeId = this.chats[0]?.id;
@@ -39,7 +39,19 @@ class Chat {
     } catch (e) { this.importWarning = 'Cursor 历史未能读取：' + e.message; }
   }
   select(id) { this.activeId = id; const chat = this.chats.find(c => c.id === id); this.messages = chat?.messages || []; this.changes = chat?.changes || []; this.threadId = chat?.threadId; this.resumed = false; this.post(); }
-  save() { if (this.stateFile && !this.storageBlocked) storage.write(this.stateFile, { activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor') }); }
+  save() {
+    if (!this.stateFile) return true;
+    const state = { activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor') };
+    try {
+      if (this.storageBlocked) { if (this.conflictFile) storage.write(this.conflictFile, state); return false; }
+      this.storageRevision = storage.write(this.stateFile, state, this.storageRevision); return true;
+    } catch (error) {
+      this.historyWarning = error.message; this.output.appendLine('历史保存失败：' + error.message);
+      if (error.code === 'GPTIDE_CONFLICT') { this.storageBlocked = true; this.conflictFile = error.conflictFile; }
+      this.post();
+      return false;
+    }
+  }
   post() {
     const chat = this.chats.find(c => c.id === this.activeId);
     this.view?.webview.postMessage({ type: 'state', project: this.project || '', status: this.status, warning: [this.historyWarning, this.importWarning].filter(Boolean).join('；'), busy: this.busy, messages: this.messages, activeId: this.activeId, source: chat?.source, chats: this.chats.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: (c.after || '').split('\n').length, removed: (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
@@ -166,7 +178,7 @@ class Chat {
       if (this.attachments.some(a => a.text.length > 50000) || budget <= 0) this.importWarning = '文件上下文最多附上约 10 万字符，长文件已截断。';
       this.baseline = mode === 'agent' ? review.snapshot(this.project) : null; this.candidates = new Map();
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
-      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model }); this.save(); this.post();
+      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model }); if (!this.save()) throw new Error(this.historyWarning); this.post();
       const instruction = mode === 'plan' ? '请先调查项目并给出具体实施计划、涉及文件和验证步骤。本轮只做计划，不修改文件。\n\n' : '';
       const result = await bridge.call('turn/start', { threadId: this.threadId, model: this.model, effort: this.effort, input: [{ type: 'text', text: instruction + importedContext + text + editorContext }], sandboxPolicy: mode !== 'agent' ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [this.project], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } });
       if (this.busy) this.turnId = result.turn.id;
@@ -236,7 +248,7 @@ class Chat {
         if (msg.type === 'copy' && typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
         if (msg.type === 'openLink' && /^https?:\/\//i.test(msg.url)) await vscode.env.openExternal(vscode.Uri.parse(msg.url));
         if (msg.type === 'settings') await vscode.commands.executeCommand('workbench.action.openSettings', 'gptide');
-        if (msg.type === 'refresh' && !this.busy) { await this.importCursor(); this.select(this.activeId); await this.connect(); await this.refreshAccount(); }
+        if (msg.type === 'refresh' && !this.busy) { if (this.conflictFile) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(); this.select(this.activeId); await this.connect(); await this.refreshAccount(); }
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
         if (msg.type === 'terminal') await vscode.commands.executeCommand('workbench.action.terminal.toggleTerminal');

@@ -11,16 +11,16 @@ function verify() {
   const d = [...document.querySelectorAll('iframe')].map(f => f.contentDocument).find(d => d?.querySelector('#input'));
   if (!d || !/[\\/]GptIDE[\\/]example-project$/i.test(d.querySelector('#project').title)) return null;
   const w = d.defaultView, messages = Array.from({ length: 1000 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', itemId: 'qa-' + i, text: 'Synthetic message ' + i }));
-  const state = { type: 'state', activeId: 'qa-only', project: d.querySelector('#project').title, chats: [], messages, models: [], attachments: [], changes: [], status: 'QA', busy: false };
+  const id = 'qa-' + Date.now(), state = { type: 'state', activeId: id, project: d.querySelector('#project').title, chats: [], messages, models: [], attachments: [], changes: [], status: 'QA', busy: false };
   const send = () => w.dispatchEvent(new w.MessageEvent('message', { data: state }));
   const began = performance.now(); send(); const initial = d.querySelectorAll('.message').length, first = d.querySelector('.message');
   messages[999] = { ...messages[999], text: 'Synthetic streamed update' }; send();
   const stable = d.querySelector('.message') === first, updated = d.querySelector('#messages').textContent.includes('Synthetic streamed update');
   d.querySelector('.load-older').click(); const expanded = d.querySelectorAll('.message').length;
   d.querySelector('#input').value = 'QA draft A'; d.querySelector('#input').dispatchEvent(new w.Event('input'));
-  state.activeId = 'qa-other'; send(); const otherEmpty = d.querySelector('#input').value === '';
+  state.activeId = id + '-other'; send(); const otherEmpty = d.querySelector('#input').value === '';
   d.querySelector('#input').value = 'QA draft B'; d.querySelector('#input').dispatchEvent(new w.Event('input'));
-  state.activeId = 'qa-only'; send(); const draftRestored = d.querySelector('#input').value === 'QA draft A';
+  state.activeId = id; send(); const draftRestored = d.querySelector('#input').value === 'QA draft A';
   d.querySelector('#refresh').click();
   return { initial, stable, updated, expanded, otherEmpty, draftRestored, durationMs: Math.round(performance.now() - began) };
 }
