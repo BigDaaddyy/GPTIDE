@@ -18,4 +18,14 @@ function gptAccountMenu(source) {
   const menu = 'async resolveMainMenuActions(e,t){let a;try{a=await this.commandService.executeCommand("gptide.accountInfo")}catch{}return[Ht({id:"gptide.account.status",label:a?.label||"GPT 账户",enabled:!1,run:()=>{}}),Ht({id:"gptide.account.login",label:"登录 / 切换 ChatGPT 账户",run:()=>this.commandService.executeCommand("gptide.accountLogin")})]}';
   return source.slice(0, start) + source.slice(start, begin).replace(name, 'name:"GPT 账户"') + accountMarker + menu + source.slice(end);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu };
+function homePage(source, renderSource) {
+  const marker = '/* GPTIDE: project home */';
+  const classStart = source.indexOf('ECt=class extends L{');
+  const existing = source.indexOf(marker, classStart);
+  const begin = existing >= 0 ? existing : source.indexOf('render(){if(this.enabled=', classStart);
+  const end = source.indexOf('filterEntries(e){', begin);
+  if (classStart < 0 || begin < 0 || end < 0) throw new Error('原生空白编辑器结构已变化，请更新首页补丁');
+  const method = renderSource.trim().replace(/^function render\(\)/, 'render()');
+  return source.slice(0, begin) + marker + method + source.slice(end);
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage };

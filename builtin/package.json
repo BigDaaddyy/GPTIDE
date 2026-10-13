@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -16,7 +16,11 @@
     }
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:gptide.homeOpenRecent",
+    "onCommand:gptide.homeAccount",
+    "onCommand:gptide.homeSSH",
+    "onCommand:gptide.homeError"
   ],
   "contributes": {
     "commands": [

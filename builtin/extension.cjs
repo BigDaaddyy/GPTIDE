@@ -361,6 +361,19 @@ class Chat {
 function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.importVSCode', () => require('./vscode-import-ui.cjs').run(vscode, path.resolve(context.extensionPath, '../../../../..')).catch(e => vscode.window.showErrorMessage(e.message))));
   let chat;
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.homeOpenRecent', (uri, workspace, remoteAuthority) => vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.parse(uri), { forceNewWindow: false, ...(remoteAuthority ? { remoteAuthority } : {}) })));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.homeError', command => vscode.window.showErrorMessage('操作未完成：' + command)));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.homeSSH', async () => {
+    const commands = await vscode.commands.getCommands(true);
+    if (commands.includes('opensshremotes.openEmptyWindow')) return vscode.commands.executeCommand('opensshremotes.openEmptyWindow');
+    const action = await vscode.window.showInformationMessage('需要安装 Remote SSH 扩展', '查看扩展');
+    if (action) return vscode.commands.executeCommand('workbench.extensions.search', 'Remote SSH');
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.homeAccount', async () => {
+    const info = require('./account.cjs').localInfo();
+    const item = await vscode.window.showQuickPick([{ label: '登录 / 切换 ChatGPT 账户' }], { title: info.label });
+    if (item) return vscode.commands.executeCommand('gptide.accountLogin');
+  }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.accountInfo', () => require('./account.cjs').localInfo()));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.accountLogin', () => require('./account.cjs').login(vscode, context, chat).catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => { chat?.invalidateProject(); vscode.commands.executeCommand('workbench.action.reloadWindow'); }));
