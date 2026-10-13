@@ -19,3 +19,4 @@ body.vscode-light{--floating-border:#e6e8ec;--floating-shadow:0 2px 6px #252b3d0
 body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(--vscode-contrastBorder,currentColor);--floating-shadow:none}
 .popup,.history-panel{border-color:var(--floating-border);box-shadow:var(--floating-shadow);border-radius:8px}
 .history-panel input:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+#draft-state{white-space:nowrap;flex-shrink:0}

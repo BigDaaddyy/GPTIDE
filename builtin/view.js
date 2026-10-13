@@ -4,6 +4,8 @@ const projectStates = savedState.projects || {}, previous = projectStates[projec
 const legacyState = savedState.projects ? savedState.legacy : savedState;
 let invalidated = false;
 const drafts = previous.drafts || {}; let draftKey, submittedDraft;
+const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0, pendingFocusChat;
+let pendingTabChange = false;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
@@ -42,7 +44,7 @@ function renderHistory() {
   for (const chat of chats) {
     const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.busy;
     row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
-    row.onclick = () => { post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
+    row.onclick = () => { flushDraft(); if (chat.id !== state.activeId) beginTabChange(); post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
   }
 }
 function renderMessages(s) {
@@ -113,19 +115,26 @@ function render(s) {
       const chat = s.chats.find(c => c.id === id); if (!chat) continue;
       const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
       const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
-      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy; close.onclick = () => post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); tab.append(button, close); el('chat-tabs').append(tab);
+      button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
+      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
     }
   }
   const nextKey = s.activeId || '__new__';
+  if (pendingTabChange && (nextKey !== draftKey || s.busy)) { pendingTabChange = false; el('input').disabled = false; if (!pendingFocusChat) el('input').focus(); }
   if (nextKey !== draftKey) {
+    flushDraft();
     if (draftKey !== undefined) drafts[draftKey] = el('input').value;
     const transferring = s.busy && submittedDraft !== undefined;
-    const nextDraft = transferring ? el('input').value : drafts[nextKey] ?? s.draft ?? '';
+    const localNewer = draftTimes[nextKey] === undefined || draftTimes[nextKey] > (s.draftUpdatedAt || 0);
+    const nextDraft = transferring ? el('input').value : localNewer ? drafts[nextKey] ?? s.draft ?? '' : s.draft ?? '';
     if (transferring) drafts[draftKey] = '';
     el('input').value = nextDraft;
-    draftKey = nextKey; resizeInput();
+    draftKey = nextKey; el('draft-state').textContent = ''; resizeInput();
+    if (transferring) scheduleDraft();
   }
+  if (pendingFocusChat) { const target = [...el('chat-tabs').querySelectorAll('[role="tab"]')].find(b => b.dataset.chatId === pendingFocusChat); target?.focus(); pendingFocusChat = undefined; }
   renderMessages(s); renderTasks(s); state = s;
+  el('input').disabled = pendingTabChange || !!s.loadingScope;
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
@@ -154,19 +163,32 @@ function render(s) {
   }
   if (!el('history-panel').hidden) renderHistory();
 }
-function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; projectStates[projectKey] = { drafts, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
-window.addEventListener('message', event => { const data = event.data; if (data.projectKey !== projectKey || invalidated) return; if (data.type === 'reset') { invalidated = true; document.body.hidden = true; return; } if (data.type === 'state') render(data); if (data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
+function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
+function flushDraft() { clearTimeout(draftTimer); if (draftKey === undefined || draftKey === '__new__' || invalidated) return; post('draft', { id: draftKey, text: el('input').value, sequence: ++draftSequence }); }
+function beginTabChange() { pendingTabChange = true; el('input').disabled = true; }
+function scheduleDraft() { clearTimeout(draftTimer); el('draft-state').textContent = el('input').value ? '草稿…' : ''; draftTimer = setTimeout(flushDraft, 650); }
+window.addEventListener('message', event => { const data = event.data; if (data.projectKey !== projectKey || invalidated) return; if (data.type === 'reset') { clearTimeout(draftTimer); invalidated = true; document.body.hidden = true; return; } if (data.type === 'tabChangePending') beginTabChange(); if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope; } if (data.type === 'state') render(data); if (data.type === 'draftSaved') { if (data.history) { state.history = data.history; if (!el('history-panel').hidden) renderHistory(); } if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存'; } if (data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); flushDraft(); } });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
-el('input').addEventListener('input', () => { resizeInput(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
+el('input').addEventListener('input', () => { resizeInput(); scheduleDraft(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
 el('input').onkeydown = e => { const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey; if (e.key === 'Enter' && sendKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!state.busy) el('send').click(); } };
-el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
+el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { flushDraft(); submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
-for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder']) el(id).onclick = () => { post(id); el('menu').hidden = true; if (id === 'new') el('input').focus(); };
+for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => el('messages').scrollTop = el('messages').scrollHeight;
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; } });
 document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; });
+el('chat-tabs').addEventListener('keydown', e => {
+  if (state.busy || e.target.getAttribute('role') !== 'tab') return;
+  const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;
+  if (e.key === 'ArrowRight') next = ids[(index + 1) % ids.length];
+  if (e.key === 'ArrowLeft') next = ids[(index + ids.length - 1) % ids.length];
+  if (e.key === 'Home') next = ids[0]; if (e.key === 'End') next = ids.at(-1);
+  if (e.key === 'Delete') { e.preventDefault(); flushDraft(); beginTabChange(); post('closeTab', { id: ids[index], draft: ids[index] === draftKey ? el('input').value : drafts[ids[index]] }); }
+  if (next && next !== state.activeId) { e.preventDefault(); flushDraft(); beginTabChange(); pendingFocusChat = next; post('select', { id: next }); }
+});
+window.addEventListener('pagehide', flushDraft);
 resizeInput(); post('ready');
