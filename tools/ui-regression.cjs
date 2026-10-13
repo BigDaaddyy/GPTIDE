@@ -21,15 +21,19 @@ function verify() {
   state.activeId = id + '-other'; send(); const otherEmpty = d.querySelector('#input').value === '';
   d.querySelector('#input').value = 'QA draft B'; d.querySelector('#input').dispatchEvent(new w.Event('input'));
   state.activeId = id; send(); const draftRestored = d.querySelector('#input').value === 'QA draft A';
+  state.tasks = [{ id: 'task', turnId: 'turn', turn: 1, kind: 'command', title: 'synthetic command', status: 'running', output: 'literal <script>text</script>' }]; send();
+  const taskRow = d.querySelector('.task-row'); taskRow.open = true;
+  state.tasks[0] = { ...state.tasks[0], status: 'failed', exitCode: 1, output: 'updated output' }; send();
+  const taskStable = d.querySelector('.task-row') === taskRow && taskRow.open && taskRow.querySelector('.task-state').textContent === '失败' && taskRow.querySelector('.task-output').textContent === 'updated output';
   d.querySelector('#refresh').click();
-  return { initial, stable, updated, expanded, otherEmpty, draftRestored, durationMs: Math.round(performance.now() - began) };
+  return { initial, stable, updated, expanded, otherEmpty, draftRestored, taskStable, durationMs: Math.round(performance.now() - began) };
 }
 (async () => {
   const targets = await (await fetch('http://127.0.0.1:9337/json/list')).json();
   for (const target of targets.filter(t => t.type === 'iframe')) {
     const result = await call(target.webSocketDebuggerUrl, '(' + verify.toString() + ')()'); if (!result) continue;
     assert.equal(result.initial, 100); assert.equal(result.stable, true); assert.equal(result.updated, true); assert.equal(result.expanded, 200);
-    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); console.log(JSON.stringify(result)); return;
+    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); assert.equal(result.taskStable, true); console.log(JSON.stringify(result)); return;
   }
   throw new Error('Open bundled example-project with debug port 9337');
 })().catch(e => { console.error(e.message); process.exitCode = 1; });

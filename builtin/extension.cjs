@@ -9,6 +9,7 @@ const review = require('./review.cjs');
 const storage = require('./storage.cjs');
 const inlineCore = require('./inline-core.cjs');
 const inlineAgent = require('./inline-agent.cjs');
+const tasklog = require('./tasklog.cjs');
 const exec = promisify(execFile);
 
 class Chat {
@@ -40,7 +41,7 @@ class Chat {
       this.importWarning = result.warnings.join('；');
     } catch (e) { this.importWarning = 'Cursor 历史未能读取：' + e.message; }
   }
-  select(id) { this.activeId = id; const chat = this.chats.find(c => c.id === id); this.messages = chat?.messages || []; this.changes = chat?.changes || []; this.threadId = chat?.threadId; this.resumed = false; this.post(); }
+  select(id) { this.activeId = id; const chat = this.chats.find(c => c.id === id); this.messages = chat?.messages || []; this.changes = chat?.changes || []; this.tasks = chat?.tasks || []; this.currentTaskTurn = chat?.taskTurn || 0; this.threadId = chat?.threadId; this.resumed = false; this.post(); }
   save() {
     if (!this.stateFile) return true;
     const state = { activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor') };
@@ -55,8 +56,9 @@ class Chat {
     }
   }
   post() {
+    clearTimeout(this.postTimer); this.postTimer = null;
     const chat = this.chats.find(c => c.id === this.activeId);
-    this.view?.webview.postMessage({ type: 'state', project: this.project || '', status: this.status, warning: [this.historyWarning, this.importWarning].filter(Boolean).join('；'), busy: this.busy, messages: this.messages, activeId: this.activeId, source: chat?.source, chats: this.chats.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: (c.after || '').split('\n').length, removed: (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', project: this.project || '', status: this.status, warning: [this.historyWarning, this.importWarning].filter(Boolean).join('；'), busy: this.busy, messages: this.messages, activeId: this.activeId, source: chat?.source, chats: this.chats.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.tasks || [], attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: (c.after || '').split('\n').length, removed: (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   async attachFiles(current = false) {
     if (!this.project || this.busy) return;
@@ -211,6 +213,7 @@ class Chat {
       for (const attachment of this.attachments) { if (budget <= 0) break; const snippet = attachment.text.slice(0, Math.min(50000, budget)); budget -= snippet.length; editorContext += `\n\n引用文件：${attachment.path}\n${snippet}`; }
       if (this.attachments.some(a => a.text.length > 50000) || budget <= 0) this.importWarning = '文件上下文最多附上约 10 万字符，长文件已截断。';
       this.baseline = mode === 'agent' ? review.snapshot(this.project) : null; this.candidates = new Map();
+      const active = this.chats.find(c => c.id === this.activeId); active.tasks ||= []; this.tasks = active.tasks; active.taskTurn = (active.taskTurn || 0) + 1; this.currentTaskTurn = active.taskTurn;
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
       this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model }); if (!this.save()) throw new Error(this.historyWarning); this.post();
       const instruction = mode === 'plan' ? '请先调查项目并给出具体实施计划、涉及文件和验证步骤。本轮只做计划，不修改文件。\n\n' : '';
@@ -231,6 +234,10 @@ class Chat {
   onNotification({ method, params: p }) {
     if (method === 'account/login/completed' && p.success) { this.refreshAccount().catch(e => { this.status = e.message; this.post(); }); return; }
     if (p?.threadId && p.threadId !== this.threadId) return;
+    if (p && tasklog.update(this.tasks || (this.tasks = []), method, p, this.currentTaskTurn)) {
+      if (method.endsWith('/outputDelta')) { if (!this.postTimer) this.postTimer = setTimeout(() => this.post(), 60); }
+      else { if (method === 'item/completed') this.save(); this.post(); }
+    }
     if (method === 'item/agentMessage/delta') {
       let item = this.messages.find(m => m.itemId === p.itemId);
       if (!item) { item = { role: 'assistant', text: '', itemId: p.itemId }; this.messages.push(item); }
@@ -246,6 +253,7 @@ class Chat {
       if (p.item.text) item.text = p.item.text; this.post();
     }
     if (method === 'turn/completed') {
+      tasklog.finish(this.tasks || [], p.turn.id, p.turn.status);
       this.busy = false; this.turnId = null; this.status = p.turn?.status === 'failed' ? p.turn.error?.message || '请求失败' : p.turn?.status === 'interrupted' ? '已停止' : '完成'; this.activity = '';
       if (this.baseline) {
         try { this.changes = review.collectChanges(this.project, this.baseline, this.candidates); } catch (e) { this.importWarning = '修改预览读取失败：' + e.message; }
@@ -277,6 +285,7 @@ class Chat {
         if (msg.type === 'rename') await this.renameChat();
         if (msg.type === 'delete') await this.deleteChat();
         if (msg.type === 'diff') await this.showDiff(msg.path);
+        if (msg.type === 'openFile' && typeof msg.path === 'string' && this.project && this.tasks?.some(task => task.files?.includes(msg.path))) { const file = path.resolve(this.project, msg.path); if (review.within(this.project, file) && fs.existsSync(file) && fs.statSync(file).isFile()) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file))); }
         if (msg.type === 'revert') await this.revert(msg.path);
         if (msg.type === 'accept' && !this.busy) { const change = this.changes.find(c => c.path === msg.path); if (change) { change.status = 'accepted'; this.save(); this.post(); } }
         if (msg.type === 'copy' && typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
@@ -290,7 +299,7 @@ class Chat {
     });
     this.post();
   }
-  dispose() { this.save(); this.bridge?.dispose(); }
+  dispose() { clearTimeout(this.postTimer); this.save(); this.bridge?.dispose(); }
 }
 function activate(context) {
   const chat = new Chat(context); context.subscriptions.push(chat);

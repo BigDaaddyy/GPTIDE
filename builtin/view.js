@@ -3,6 +3,7 @@ const previous = api.getState() || {};
 const drafts = previous.drafts || {}; let draftKey, submittedDraft;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
+const taskRows = new Map(); let taskChat;
 const post = (type, data = {}) => api.postMessage({ type, ...data });
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 function inline(node, text) {
@@ -81,6 +82,30 @@ function renderMessages(s) {
   if (atBottom || switched) box.scrollTop = box.scrollHeight; else box.scrollTop = oldTop;
   el('scroll-bottom').hidden = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
 }
+function renderTasks(s) {
+  const tasks = s.tasks || [], key = s.activeId || '__new__';
+  el('task-panel').hidden = !tasks.length; el('task-count').textContent = `${tasks.length} 个步骤`;
+  if (key !== taskChat) { taskChat = key; taskRows.clear(); el('task-list').replaceChildren(); }
+  const keys = new Set();
+  const kinds = { read: '读取', search: '查找', command: '命令', file: '文件', tool: '工具' };
+  const statuses = { running: s.busy ? '运行中' : '未确认结果', completed: '完成', failed: '失败', interrupted: '已停止', ended: '已结束' };
+  for (const task of tasks) {
+    const id = task.turnId + ':' + task.id; keys.add(id); let row = taskRows.get(id);
+    if (!row) {
+      const node = make('details', 'task-row'), summary = make('summary'), label = make('span', 'task-name'), status = make('span', 'task-state'); summary.append(label, status);
+      const body = make('div', 'task-body'), meta = make('div', 'task-meta'), files = make('div', 'task-files'), output = make('pre', 'task-output'), copy = make('button', 'text-button', '复制输出');
+      copy.onclick = () => post('copy', { text: row.task.output || '' }); body.append(meta, files, output, copy); node.append(summary, body); el('task-list').append(node);
+      row = { node, label, status, meta, files, output, copy }; taskRows.set(id, row);
+    }
+    row.task = task; row.label.textContent = `#${task.turn || 1} · ${kinds[task.kind] || '步骤'} · ${task.title}`; row.label.title = task.title;
+    row.status.textContent = statuses[task.status] || task.status; row.status.className = 'task-state ' + task.status;
+    row.meta.textContent = [typeof task.exitCode === 'number' ? `退出码 ${task.exitCode}` : '', typeof task.durationMs === 'number' ? `${(task.durationMs / 1000).toFixed(1)} 秒` : '', task.truncated ? '输出仅保留最后 12000 字符' : ''].filter(Boolean).join(' · ');
+    if (row.output.textContent !== (task.output || '')) row.output.textContent = task.output || ''; row.output.hidden = !task.output; row.copy.disabled = !task.output;
+    const files = JSON.stringify(task.files || []);
+    if (files !== row.filesSignature) { row.filesSignature = files; row.files.replaceChildren(); for (const file of task.files || []) { const button = make('button', 'link', file); button.title = '打开项目文件'; button.onclick = () => post('openFile', { path: file }); row.files.append(button); } }
+  }
+  for (const [id, row] of taskRows) if (!keys.has(id)) { row.node.remove(); taskRows.delete(id); }
+}
 function render(s) {
   const nextKey = s.activeId || '__new__';
   if (nextKey !== draftKey) {
@@ -91,7 +116,7 @@ function render(s) {
     el('input').value = nextDraft;
     draftKey = nextKey; resizeInput();
   }
-  renderMessages(s); state = s;
+  renderMessages(s); renderTasks(s); state = s;
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
