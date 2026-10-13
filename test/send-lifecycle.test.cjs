@@ -311,3 +311,11 @@ test('stream bursts coalesce state snapshots and final message flushes pending u
   chat.onNotification({ method: 'item/completed', params: { threadId: 'thread', turnId: 'stream', item: { id: 'message', type: 'agentMessage', text: 'final' } } });
   assert.equal(snapshots.length, 2); assert.equal(snapshots.at(-1).messages[0].text, 'final'); await new Promise(resolve => setTimeout(resolve, 90)); assert.equal(snapshots.length, 2); assert.equal(chat.postTimer, null);
 });
+
+test('stream patches exclude old history and fall back to full state after a conversation changes', () => {
+  const chat = fixture(), snapshots = []; chat.post = Chat.prototype.post; chat.view.webview.postMessage = value => snapshots.push(value);
+  chat.messages.push(...Array.from({ length: 2000 }, (_, i) => ({ role: 'user', text: 'old ' + i }))); chat.post();
+  const revision = snapshots[0].revision; chat.messages.push({ role: 'assistant', text: 'streamed' }); chat.streamUpdates = new Set([2000]); chat.postStream();
+  assert.equal(snapshots[1].type, 'stream'); assert.equal(snapshots[1].revision, revision); assert.equal(snapshots[1].messages.length, 1); assert.equal(snapshots[1].messageCount, 2001); assert.equal(snapshots[1].messages[0].index, 2000); assert.ok(JSON.stringify(snapshots[1]).length < 400);
+  chat.activeId = 'changed'; chat.postStream(); assert.equal(snapshots[2].type, 'state'); assert.ok(snapshots[2].revision > revision);
+});

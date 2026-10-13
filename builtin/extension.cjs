@@ -169,10 +169,20 @@ class Chat {
   post() {
     if (this.invalidated) return;
     clearTimeout(this.postTimer); this.postTimer = null;
+    this.streamRevision = (this.streamRevision || 0) + 1;
+    this.streamBase = { activeId: this.activeId, count: this.messages.length };
+    this.streamUpdates?.clear();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
-  schedulePost() { if (!this.postTimer && !this.invalidated) this.postTimer = setTimeout(() => { this.postTimer = null; this.post(); }, 60); }
+  postStream() {
+    if (this.invalidated) return;
+    const base = this.streamBase, updates = [...(this.streamUpdates || [])].sort((a, b) => a - b);
+    if (!base || this.loadingScope || base.activeId !== this.activeId || this.messages.length < base.count || this.messages.slice(base.count).some((_, i) => !updates.includes(base.count + i))) { this.post(); return; }
+    this.view?.webview.postMessage({ type: 'stream', projectKey: this.projectKey, revision: this.streamRevision, activeId: this.activeId, messageCount: this.messages.length, messages: updates.map(index => ({ index, message: this.messages[index] })), tasks: this.tasks || [] });
+    base.count = this.messages.length; this.streamUpdates?.clear();
+  }
+  schedulePost() { if (!this.postTimer && !this.invalidated) this.postTimer = setTimeout(() => { this.postTimer = null; this.postStream(); }, 60); }
   async attachFiles(current = false) {
     await this.ready;
     if (!this.project || this.busy || this.invalidated) return;
@@ -514,7 +524,7 @@ class Chat {
     if (method === 'item/agentMessage/delta' && typeof p.itemId === 'string' && typeof p.delta === 'string') {
       let item = this.messages.find(m => m.itemId === p.itemId);
       if (!item) { item = { role: 'assistant', text: '', itemId: p.itemId }; this.messages.push(item); }
-      item.text += p.delta; this.schedulePost();
+      item.text += p.delta; (this.streamUpdates ||= new Set()).add(this.messages.indexOf(item)); this.schedulePost();
     }
     if (method === 'item/started') { this.activity = p.item?.type === 'commandExecution' ? '运行：' + p.item.command : p.item?.type === 'fileChange' ? '正在修改文件' : '正在处理项目'; this.post(); }
     if (method === 'item/completed' && p.item?.type === 'fileChange' && this.candidates) {
@@ -536,7 +546,7 @@ class Chat {
     this.busy = false; this.turnId = null; this.status = turn.status === 'failed' ? turn.error?.message || '请求失败' : turn.status === 'interrupted' ? '已停止' : '完成'; this.activity = '';
     const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey);
     if (this.baseline) {
-      try { this.changes = review.collectChanges(this.project, this.baseline, this.candidates || new Map()); if (chat) { this.changes.limited = !!(this.baseline.limited || this.changes.limited); chat.changes = this.changes; chat.pendingCheckpointTurn = this.currentTaskTurn; if (this.changes.limited) this.importWarning = '此轮检查点只覆盖已采集的文本文件'; this.prepareReview(chat, false); } }
+      try { this.changes = review.collectRoundChanges(this.project, this.baseline, this.candidates || new Map()); if (chat) { this.changes.limited = !!(this.baseline.limited || this.changes.limited); chat.changes = this.changes; chat.pendingCheckpointTurn = this.currentTaskTurn; if (this.changes.limited) this.importWarning = '此轮检查点只覆盖已采集的文本文件'; this.prepareReview(chat, false); } }
       catch (error) { this.importWarning = '修改预览读取失败：' + error.message; }
       this.baseline = null;
     }

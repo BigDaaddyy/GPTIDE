@@ -263,6 +263,16 @@ window.addEventListener('message', event => {
   if (data.type === 'tabChangePending') beginTabChange();
   if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope || !!state.storageBlocked; }
   if (data.type === 'state') render(data);
+  if (data.type === 'stream') {
+    if (data.revision !== state.revision || data.activeId !== state.activeId) return;
+    const messages = state.messages.slice(), updates = data.messages;
+    const valid = Number.isSafeInteger(data.messageCount) && data.messageCount >= messages.length && Array.isArray(updates) && updates.every(update => Number.isSafeInteger(update.index) && update.index >= 0 && update.index < data.messageCount && typeof update.message?.text === 'string' && typeof update.message?.role === 'string');
+    if (!valid || data.messageCount - messages.length > updates.length) { post('ready'); return; }
+    for (const update of updates) messages[update.index] = update.message;
+    for (let index = state.messages.length; index < data.messageCount; index++) if (!messages[index]) { post('ready'); return; }
+    state = { ...state, messages, tasks: Array.isArray(data.tasks) ? data.tasks : state.tasks };
+    renderMessages(state); renderTasks(state); updateFind(false);
+  }
   if (data.type === 'draftSaved') {
     if (data.history) { state.history = data.history; if (!el('history-panel').hidden) renderHistory(); }
     if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存';
