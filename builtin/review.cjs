@@ -36,8 +36,9 @@ function snapshot(root, maximum = 2500) {
   visit(root); return { files, limited };
 }
 function collectChanges(root, baseline, candidates) {
-  const result = [];
+  const result = []; let total = 0;
   for (const file of candidates.keys()) {
+    if (result.length >= 2500) { result.limited = true; break; }
     const absolute = path.resolve(root, file);
     if (!within(root, absolute)) continue;
     const after = readText(absolute), before = baseline.files.get(key(absolute));
@@ -45,6 +46,8 @@ function collectChanges(root, baseline, candidates) {
     // A file absent from the snapshot can be newly created or excluded: only
     // explicit add events establish a safe empty baseline for such a path.
     if (before === undefined && candidates.get(file) !== 'add') continue;
+    const size = Buffer.byteLength(before || '') + Buffer.byteLength(after || '');
+    if (total + size > 32 * 1024 * 1024) { result.limited = true; continue; } total += size;
     result.push({ path: absolute, relative: path.relative(root, absolute), before: before ?? null, after, status: 'pending' });
   }
   return result;

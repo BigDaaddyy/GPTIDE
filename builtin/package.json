@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -97,6 +97,11 @@
         "command": "gptide.exportChat",
         "title": "GptIDE: 导出当前项目对话",
         "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.cleanupCheckpoints",
+        "title": "GptIDE: 清理未引用的检查点缓存",
+        "enablement": "workspaceFolderCount == 1"
       }
     ],
     "keybindings": [
@@ -175,6 +180,10 @@
         },
         {
           "command": "gptide.exportChat",
+          "when": "workspaceFolderCount == 1"
+        },
+        {
+          "command": "gptide.cleanupCheckpoints",
           "when": "workspaceFolderCount == 1"
         }
       ],
@@ -294,6 +303,20 @@
           "type": "boolean",
           "default": true,
           "description": "在状态栏显示本机缓存用量。"
+        },
+        "gptide.review.maxCheckpoints": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "每个对话保留的改动检查点数量。"
+        },
+        "gptide.review.storageLimitMb": {
+          "type": "number",
+          "default": 128,
+          "minimum": 32,
+          "maximum": 512,
+          "description": "每项目检查点内容缓存上限，MiB。"
         }
       }
     }

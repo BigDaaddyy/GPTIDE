@@ -151,15 +151,15 @@ function renderTasks(s) {
   for (const [id, row] of taskRows) if (!keys.has(id)) { row.node.remove(); taskRows.delete(id); }
 }
 function render(s) {
-  const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.chats.map(c => [c.id, c.name])]);
+  const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.reviewBusy, s.chats.map(c => [c.id, c.name])]);
   if (tabs !== tabsSignature) {
     tabsSignature = tabs; el('chat-tabs').replaceChildren();
     for (const id of s.openChatIds || []) {
       const chat = s.chats.find(c => c.id === id); if (!chat) continue;
       const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
       const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
-      button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
-      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
+      button.disabled = s.busy || s.reviewBusy; button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
+      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy || s.reviewBusy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
     }
   }
   const nextKey = s.activeId || '__new__';
@@ -187,7 +187,8 @@ function render(s) {
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
-  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy;
+  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
+  el('send').disabled = !!s.reviewBusy;
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
     optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));
@@ -198,11 +199,17 @@ function render(s) {
   if (!s.busy && s.mode) el('mode').value = previous.mode || s.mode;
   el('attachments').replaceChildren();
   for (const attachment of s.attachments || []) { const chip = make('span', 'file-chip', attachment.label), remove = make('button', '', '×'); remove.disabled = s.busy; remove.title = '移除引用'; remove.onclick = () => post('removeAttachment', { id: attachment.id }); chip.append(remove); el('attachments').append(chip); }
-  const reviews = JSON.stringify(s.changes); if (reviews !== reviewSignature) {
-    reviewSignature = reviews; el('review').hidden = !s.changes?.length; el('review-count').textContent = `${s.changes?.length || 0} 个文件`; el('review-files').replaceChildren();
+  const checkpoints = s.checkpoints || [], reviews = JSON.stringify([s.changes, checkpoints, s.activeCheckpointId, s.busy, s.reviewBusy]); if (reviews !== reviewSignature) {
+    reviewSignature = reviews; el('review').hidden = !s.changes?.length && !checkpoints.length; el('review-count').textContent = `${s.changes?.length || 0} 个文件`; el('review-files').replaceChildren();
+    el('checkpoint-select').replaceChildren();
+    if (!s.activeCheckpointId && s.changes?.length) el('checkpoint-select').add(new Option('当前改动', 'current'));
+    for (const checkpoint of [...checkpoints].reverse()) el('checkpoint-select').add(new Option(`${checkpoint.legacy ? '旧版记录' : '第 ' + checkpoint.turn + ' 轮'} · ${checkpoint.count} 文件${checkpoint.limited ? '（部分）' : ''}`, checkpoint.id));
+    el('checkpoint-select').value = s.activeCheckpointId || 'current'; el('checkpoint-select').disabled = s.busy || s.reviewBusy;
     for (const change of s.changes || []) { const row = make('div', 'review-row'), file = make('button', 'review-path', change.relative); file.title = '查看修改差异'; file.onclick = () => post('diff', { path: change.path }); row.append(file);
-      if (change.status === 'pending') { for (const [label, type] of [['保留', 'accept'], ['撤销', 'revert']]) { const button = make('button', 'text-button', label); button.onclick = () => post(type, { path: change.path }); row.append(button); } }
-      else row.append(make('span', 'review-status', change.status === 'accepted' ? '已保留' : '已撤销')); el('review-files').append(row);
+      const actions = change.status === 'pending' ? [['保留', 'accept'], ['撤销', 'revert']] : change.status === 'accepted' ? [['撤销', 'revert']] : [['重做', 'redo']];
+      if (change.status !== 'pending') row.append(make('span', 'review-status', change.status === 'accepted' ? '已保留' : '已撤销'));
+      for (const [label, type] of actions) { const button = make('button', 'text-button', label); button.disabled = s.busy || s.reviewBusy; button.onclick = () => post(type, { path: change.path }); row.append(button); }
+      const current = make('button', 'text-button', '当前'); current.title = '此轮修改后与当前文件比较'; current.onclick = () => post('diffCurrent', { path: change.path }); row.append(current); el('review-files').append(row);
     }
   }
   if (!el('history-panel').hidden) renderHistory();
@@ -225,6 +232,7 @@ el('find-prev').onclick = () => moveFind(-1); el('find-next').onclick = () => mo
 el('task-filter').onchange = () => renderTasks(state);
 el('task-failures').onclick = () => { el('task-failures').setAttribute('aria-pressed', String(el('task-failures').getAttribute('aria-pressed') !== 'true')); renderTasks(state); };
 el('task-copy').onclick = () => post('copyTasks', { ids: [...taskRows.entries()].filter(([, row]) => !row.node.hidden).map(([id]) => id) });
+el('checkpoint-select').onchange = () => { if (el('checkpoint-select').value !== 'current') post('checkpoint', { id: el('checkpoint-select').value }); };
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
 for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
@@ -233,7 +241,7 @@ el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAncho
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; if (!el('find-bar').hidden) closeFind(); } });
 document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; });
 el('chat-tabs').addEventListener('keydown', e => {
-  if (state.busy || e.target.getAttribute('role') !== 'tab') return;
+  if (state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
   const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;
   if (e.key === 'ArrowRight') next = ids[(index + 1) % ids.length];
   if (e.key === 'ArrowLeft') next = ids[(index + ids.length - 1) % ids.length];

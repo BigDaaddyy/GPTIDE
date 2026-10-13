@@ -61,3 +61,45 @@ test('export command writes the complete selected project conversation and rejec
     await chat.exportChat(); assert.equal(fs.readFileSync(file, 'utf8'), output);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('old checkpoints restore in order, reject later edits and support explicit redo', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-restore-'));
+  try {
+    const file = path.join(root, 'a.txt'), chat = fixture(); chat.project = root;
+    chat.checkpointStore = new (require('../builtin/checkpoints.cjs').Checkpoints)(path.join(root, 'cache'), root, 'project');
+    const first = chat.checkpointStore.create([{ path: file, before: 'A\r\n', after: 'B\r\n' }], 1);
+    const second = chat.checkpointStore.create([{ path: file, before: 'B\r\n', after: 'C\r\n' }], 2);
+    chat.chats[0].checkpoints = [first, second]; fs.writeFileSync(file, 'C\r\n');
+    vscode.workspace.textDocuments = [];
+    vscode.Uri = { file: value => ({ fsPath: value, scheme: 'file' }) };
+    let complete;
+    vscode.workspace.fs = { writeFile: async (uri, data) => { await new Promise(resolve => { complete = resolve; }); fs.writeFileSync(uri.fsPath, data); } };
+    chat.selectCheckpoint(first.id); await assert.rejects(chat.revert(file), /后续修改/);
+    chat.selectCheckpoint(second.id); const restoring = chat.revert(file); await Promise.resolve();
+    assert.equal(chat.reviewBusy, true); chat.selectCheckpoint(first.id); assert.equal(chat.activeCheckpointId, second.id);
+    complete(); await restoring; assert.equal(fs.readFileSync(file, 'utf8'), 'B\r\n'); assert.equal(second.changes[0].status, 'reverted');
+    vscode.workspace.fs.writeFile = async (uri, data) => fs.writeFileSync(uri.fsPath, data);
+    chat.selectCheckpoint(first.id); await chat.revert(file); assert.equal(fs.readFileSync(file, 'utf8'), 'A\r\n');
+    await chat.revert(file, true); assert.equal(fs.readFileSync(file, 'utf8'), 'B\r\n'); assert.equal(first.changes[0].status, 'pending');
+    vscode.workspace.textDocuments = [{ uri: vscode.Uri.file(file), isDirty: true }];
+    await assert.rejects(chat.revert(file), /未保存/); vscode.workspace.textDocuments = [];
+    fs.writeFileSync(file, 'manual edit'); await assert.rejects(chat.revert(file), /后续修改/);
+    assert.equal(chat.reviewBusy, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('manual cache cleanup retains backup and conflict recovery references', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-cleanup-'));
+  try {
+    const chat = fixture(); chat.project = root; chat.data = root; chat.stateFile = path.join(root, 'project.json');
+    chat.checkpointStore = new (require('../builtin/checkpoints.cjs').Checkpoints)(path.join(root, 'cache'), root, 'project');
+    const records = ['backup', 'conflict', 'unused'].map(text => chat.checkpointStore.create([{ path: path.join(root, text), before: null, after: text }]));
+    for (const record of records) { const time = new Date(Date.now() - 120000); fs.utimesSync(path.join(chat.checkpointStore.blobs, record.changes[0].afterRef), time, time); }
+    fs.writeFileSync(chat.stateFile, JSON.stringify({ projectKey: 'project', chats: [] }));
+    fs.writeFileSync(chat.stateFile + '.bak', JSON.stringify({ projectKey: 'project', chats: [{ checkpoints: [records[0]] }] }));
+    fs.writeFileSync(chat.stateFile + '.conflict-qa.json', JSON.stringify({ projectKey: 'project', chats: [{ checkpoints: [records[1]] }] }));
+    vscode.window.showInformationMessage = () => {};
+    chat.cleanupCheckpoints(); assert.equal(chat.checkpointStore.get(records[0].changes[0].afterRef), 'backup'); assert.equal(chat.checkpointStore.get(records[1].changes[0].afterRef), 'conflict');
+    assert.throws(() => chat.checkpointStore.get(records[2].changes[0].afterRef), /缺失/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

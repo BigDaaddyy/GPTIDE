@@ -30,3 +30,5 @@ body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(
 .task-empty{padding:6px 8px;color:var(--muted)}
 .scroll-bottom{right:12px;bottom:104px}
 .popup{max-height:calc(100dvh - 52px);overflow-y:auto}
+#checkpoint-select{min-width:0;max-width:145px;font-size:10px;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px}
+.review-title{flex-wrap:wrap}.review-title strong{white-space:nowrap}.review-title #review-count{white-space:nowrap}

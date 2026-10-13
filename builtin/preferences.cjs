@@ -9,7 +9,9 @@ function values(config) {
     defaultMode: pick('defaultMode', ['agent', 'ask', 'plan'], 'agent'),
     defaultEffort: pick('reasoningEffort', ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'], 'medium'),
     submitKey: pick('chat.submitKey', ['enter', 'ctrlEnter'], 'enter'),
-    importLimit: bound('context.importLimit', 20000, 300000, 180000)
+    importLimit: bound('context.importLimit', 20000, 300000, 180000),
+    reviewStorageLimitMb: bound('review.storageLimitMb', 32, 512, 128),
+    reviewMaxCheckpoints: bound('review.maxCheckpoints', 1, 50, 20)
   };
 }
 module.exports = { values };
