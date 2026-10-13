@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -303,6 +303,26 @@
           "type": "boolean",
           "default": true,
           "description": "在状态栏显示本机缓存用量。"
+        },
+        "gptide.usage.autoRefreshSeconds": {
+          "type": "number",
+          "default": 60,
+          "enum": [
+            0,
+            30,
+            60,
+            120,
+            300,
+            600
+          ],
+          "description": "定期读取本机用量记录的间隔；0 关闭定期读取，不发起模型请求。"
+        },
+        "gptide.usage.staleAfterMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 240,
+          "description": "缓存超过该分钟数或窗口已过期时，不在状态栏显示剩余百分比。"
         },
         "gptide.review.maxCheckpoints": {
           "type": "number",

@@ -206,3 +206,11 @@ test('long Cursor import confirmation keeps conversation locked and cancellation
   assert.equal(chat.busy, true); chat.newChat(); assert.equal(chat.activeId, 'one'); answer(undefined); await pending;
   assert.equal(chat.busy, false); assert.equal(calls, 0); assert.equal(chat.chats.length, 1); assert.equal(chat.chats[0].source, 'cursor'); assert.equal(chat.chats[0].draft, 'submitted');
 });
+
+test('project login cannot connect during a running task and disposal invalidates pending prompts', async () => {
+  const chat = fixture(); chat.busy = true; chat.connect = () => { throw new Error('No login connection allowed'); };
+  await assert.rejects(chat.login(), /当前任务/);
+  let canceled = false, disposed = 0;
+  chat.pendingRequests = new Map([['request', { resolved: false, token: { cancel: () => { canceled = true; } } }]]); chat.bridge = { dispose: () => { disposed++; } };
+  chat.dispose(); assert.equal(chat.invalidated, true); assert.equal(canceled, true); assert.equal(chat.pendingRequests.get('request').resolved, true); assert.equal(disposed, 1);
+});

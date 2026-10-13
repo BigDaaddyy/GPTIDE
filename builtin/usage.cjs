@@ -1,4 +1,6 @@
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
+const changes = new (require('node:events').EventEmitter)();
+const writes = new Map();
 const home = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 function window(value) {
   if (!value) return null;
@@ -6,7 +8,7 @@ function window(value) {
   if (typeof used !== 'number' || !Number.isFinite(used)) return null;
   const minutes = value.windowDurationMins ?? value.window_minutes;
   const reset = value.resetsAt ?? value.resets_at;
-  return { usedPercent: Math.min(100, Math.max(0, used)), remainingPercent: Math.max(0, Math.min(100, 100 - used)), windowDurationMins: typeof minutes === 'number' ? minutes : null, resetsAt: typeof reset === 'number' ? reset : null };
+  return { usedPercent: Math.min(100, Math.max(0, used)), remainingPercent: Math.max(0, Math.min(100, 100 - used)), windowDurationMins: typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0 ? minutes : null, resetsAt: typeof reset === 'number' && Number.isFinite(reset) && reset > 0 ? reset : null };
 }
 function normalize(value, timestamp, source) {
   if (!value || !Number.isFinite(Date.parse(timestamp))) return null;
@@ -55,9 +57,20 @@ async function read(root, base = home()) {
 async function save(root, raw) {
   const value = raw?.rateLimitsByLimitId?.codex || raw?.rateLimits || raw;
   const result = normalize(value, new Date().toISOString(), 'GptIDE 缓存'); if (!result) return;
+  const key = path.resolve(root), task = (writes.get(key) || Promise.resolve()).catch(() => {}).then(() => writeCache(key, result));
+  writes.set(key, task); task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {}); return task;
+}
+async function writeCache(root, result) {
   await fs.mkdir(path.join(root, 'data'), { recursive: true });
   const target = path.join(root, 'data', 'usage.json'), temp = target + '.' + require('node:crypto').randomUUID() + '.tmp';
-  try { await fs.writeFile(temp, JSON.stringify(result)); await fs.rename(temp, target); } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
+  try { await fs.writeFile(temp, JSON.stringify(result)); await fs.rename(temp, target); changes.emit('change', path.resolve(root)); } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
 }
 function label(w) { return w?.windowDurationMins === 10080 ? '每周' : w?.windowDurationMins === 300 ? '5 小时' : w?.windowDurationMins ? `${w.windowDurationMins} 分钟` : '用量窗口'; }
-module.exports = { read, save, normalize, label, sessionFiles, fromSession };
+function status(record, w = record?.primary, now = Date.now(), staleMinutes = 15) {
+  if (!record || !w) return 'unknown';
+  if (w.resetsAt && w.resetsAt * 1000 <= now) return 'expired';
+  const time = Date.parse(record.timestamp); if (!Number.isFinite(time) || time > now + 300000 || now - time > staleMinutes * 60000) return 'stale';
+  return 'cached';
+}
+function onChange(listener) { changes.on('change', listener); return { dispose: () => changes.off('change', listener) }; }
+module.exports = { read, save, normalize, label, status, onChange, sessionFiles, fromSession };

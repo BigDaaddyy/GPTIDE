@@ -350,7 +350,15 @@ class Chat {
     if (!current?.supportedReasoningEfforts?.some(e => e.reasoningEffort === this.effort)) this.effort = current?.defaultReasoningEffort || 'medium';
     this.status = this.account ? `ChatGPT ${(this.account.plan || '').toUpperCase()} 已连接` : '请使用 ChatGPT 登录'; this.post();
   }
-  async login() { await this.ready; const bridge = await this.connect(); const result = await bridge.call('account/login/start', { type: 'chatgpt' }); if (result.authUrl) await vscode.env.openExternal(vscode.Uri.parse(result.authUrl)); this.status = '请在浏览器完成 ChatGPT 登录'; this.post(); }
+  async login() {
+    await this.ready;
+    if (this.invalidated) throw new Error('项目已切换');
+    if (this.busy || this.reviewBusy || this.inlineBusy) throw new Error('请先完成或停止当前任务，再切换 ChatGPT 账户');
+    if (this.loginPending) return;
+    this.loginPending = true;
+    try { const bridge = await this.connect(); if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy) throw new Error('当前状态已变化，请完成任务后重试'); const result = await bridge.call('account/login/start', { type: 'chatgpt' }); if (this.invalidated) return; if (result.authUrl && !await vscode.env.openExternal(vscode.Uri.parse(result.authUrl))) throw new Error('无法打开登录页面'); this.status = '请在浏览器完成 ChatGPT 登录'; this.post(); }
+    finally { this.loginPending = false; }
+  }
   async send(text, mode, attach, clientSendId) {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换。');
@@ -561,7 +569,7 @@ class Chat {
     this.view?.webview.postMessage({ type: 'reset', projectKey: this.projectKey });
     this.messages = []; this.chats = []; this.tasks = []; this.changes = []; this.attachments = []; this.threadId = null;
   }
-  dispose() { clearTimeout(this.postTimer); this.save(); this.bridge?.dispose(); this.pendingBridge?.dispose(); }
+  dispose() { this.invalidateProject(); }
 }
 function activate(context) {
   require('./usage-ui.cjs').install(vscode, context, path.resolve(context.extensionPath, '../../../../..'));

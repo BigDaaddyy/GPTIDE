@@ -27,3 +27,20 @@ test('preferences reject invalid enums and bound limits', () => {
   const result = preferences.values({ get: (key, fallback) => data[key] ?? fallback });
   assert.equal(result.autoConnect, false); assert.equal(result.approvalPolicy, 'on-request'); assert.equal(result.rpcTimeout, 10000); assert.equal(result.importLimit, 300000); assert.equal(result.networkAccess, false);
 });
+
+test('expired and old records never imply current available quota or invented reset', () => {
+  const now = Date.parse('2026-10-13T14:00:00Z'), record = usage.normalize({ primary: { usedPercent: 20, resetsAt: (now + 60000) / 1000 }, secondary: { usedPercent: 30, windowDurationMins: Infinity, resetsAt: NaN } }, new Date(now).toISOString(), 'fixture');
+  assert.equal(usage.status(record, record.primary, now), 'cached'); assert.equal(usage.status(record, record.primary, now + 60001), 'expired');
+  assert.equal(usage.status(record, record.secondary, now + 16 * 60000), 'stale'); assert.equal(record.secondary.resetsAt, null); assert.equal(record.secondary.windowDurationMins, null);
+  assert.equal(usage.status(null, null, now), 'unknown'); assert.equal(usage.status({ ...record, timestamp: new Date(now + 10 * 60000).toISOString() }, record.primary, now), 'stale');
+});
+
+test('cache writes stay ordered and only notify listeners after persistence', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gptide-usage-events-')), events = [];
+  const listener = usage.onChange(changed => events.push(changed));
+  try {
+    await Promise.all([usage.save(root, { primary: { usedPercent: 10 } }), usage.save(root, { primary: { usedPercent: 20 } })]);
+    const cache = JSON.parse(await fs.readFile(path.join(root, 'data/usage.json'))); assert.equal(cache.primary.usedPercent, 20); assert.deepEqual(events, [path.resolve(root), path.resolve(root)]);
+    listener.dispose(); await usage.save(root, { primary: { usedPercent: 30 } }); assert.equal(events.length, 2);
+  } finally { listener.dispose(); await fs.rm(root, { recursive: true, force: true }); }
+});
