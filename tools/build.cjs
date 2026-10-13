@@ -18,14 +18,14 @@ const settingsFile = path.join(user, 'settings.json');
 // Existing user customizations remain owned by the user.
 const keysFile = path.join(user, 'keybindings.json');
 if (!fs.existsSync(keysFile)) fs.writeFileSync(keysFile, JSON.stringify([
-  { key: 'ctrl+k', command: 'gptide.inlineEdit', when: 'editorTextFocus && workspaceFolderCount > 0' },
-  { key: 'ctrl+shift+k', command: 'gptide.attachSelection', when: 'editorTextFocus && workspaceFolderCount > 0' }
+  { key: 'ctrl+k', command: 'gptide.inlineEdit', when: 'editorTextFocus && workspaceFolderCount == 1' },
+  { key: 'ctrl+shift+k', command: 'gptide.attachSelection', when: 'editorTextFocus && workspaceFolderCount == 1' }
 ], null, 2));
 else {
   // Migrate only our original defaults; preserve customized conditions/JSONC.
   try {
     const keys = JSON.parse(fs.readFileSync(keysFile, 'utf8')); let changed = false;
-    for (const binding of keys) if (['gptide.inlineEdit', 'gptide.attachSelection'].includes(binding.command) && binding.when === 'editorTextFocus') { binding.when = 'editorTextFocus && workspaceFolderCount > 0'; changed = true; }
+    for (const binding of keys) if (['gptide.inlineEdit', 'gptide.attachSelection'].includes(binding.command) && ['editorTextFocus', 'editorTextFocus && workspaceFolderCount > 0'].includes(binding.when)) { binding.when = 'editorTextFocus && workspaceFolderCount == 1'; changed = true; }
     if (changed) fs.writeFileSync(keysFile, JSON.stringify(keys, null, 2));
   } catch {}
 }

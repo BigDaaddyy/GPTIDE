@@ -11,7 +11,7 @@ function verify() {
   const d = [...document.querySelectorAll('iframe')].map(f => f.contentDocument).find(d => d?.querySelector('#input'));
   if (!d || !/[\\/]GptIDE[\\/]example-project$/i.test(d.querySelector('#project').title)) return null;
   const w = d.defaultView, messages = Array.from({ length: 1000 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', itemId: 'qa-' + i, text: 'Synthetic message ' + i }));
-  const id = 'qa-' + Date.now(), state = { type: 'state', activeId: id, project: d.querySelector('#project').title, chats: [], messages, models: [], attachments: [], changes: [], status: 'QA', busy: false };
+  const id = 'qa-' + Date.now(), state = { type: 'state', projectKey: d.body.dataset.projectKey, activeId: id, project: d.querySelector('#project').title, chats: [], messages, models: [], attachments: [], changes: [], status: 'QA', busy: false };
   const send = () => w.dispatchEvent(new w.MessageEvent('message', { data: state }));
   const began = performance.now(); send(); const initial = d.querySelectorAll('.message').length, first = d.querySelector('.message');
   messages[999] = { ...messages[999], text: 'Synthetic streamed update' }; send();
@@ -25,16 +25,16 @@ function verify() {
   const taskRow = d.querySelector('.task-row'); taskRow.open = true;
   state.tasks[0] = { ...state.tasks[0], status: 'failed', exitCode: 1, output: 'updated output' }; send();
   const taskStable = d.querySelector('.task-row') === taskRow && taskRow.open && taskRow.querySelector('.task-state').textContent === '失败' && taskRow.querySelector('.task-output').textContent === 'updated output';
-  d.querySelector('#refresh').click();
+  const original = state.projectKey; state.projectKey = 'foreign-project'; state.messages = [{ role: 'user', text: 'FOREIGN_PROJECT_LEAK' }]; state.chats = [{ id: 'foreign', name: 'FOREIGN_PROJECT_LEAK' }]; state.attachments = [{ id: 'foreign', label: 'FOREIGN_PROJECT_LEAK' }]; send(); const projectIsolated = !d.body.textContent.includes('FOREIGN_PROJECT_LEAK'); state.projectKey = original; d.querySelector('#refresh').click();
   const bodyStyle = w.getComputedStyle(d.body), compact = bodyStyle.paddingLeft === '0px' && bodyStyle.paddingRight === '0px' && d.querySelector('.composer').getBoundingClientRect().height <= 90;
-  return { initial, stable, updated, expanded, otherEmpty, draftRestored, taskStable, compact, durationMs: Math.round(performance.now() - began) };
+  return { initial, stable, updated, expanded, otherEmpty, draftRestored, taskStable, compact, projectIsolated, durationMs: Math.round(performance.now() - began) };
 }
 (async () => {
   const targets = await (await fetch('http://127.0.0.1:9337/json/list')).json();
   for (const target of targets.filter(t => t.type === 'iframe')) {
     const result = await call(target.webSocketDebuggerUrl, '(' + verify.toString() + ')()'); if (!result) continue;
     assert.equal(result.initial, 100); assert.equal(result.stable, true); assert.equal(result.updated, true); assert.equal(result.expanded, 200);
-    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); assert.equal(result.taskStable, true); assert.equal(result.compact, true); console.log(JSON.stringify(result)); return;
+    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); assert.equal(result.taskStable, true); assert.equal(result.compact, true); assert.equal(result.projectIsolated, true); console.log(JSON.stringify(result)); return;
   }
   throw new Error('Open bundled example-project with debug port 9337');
 })().catch(e => { console.error(e.message); process.exitCode = 1; });

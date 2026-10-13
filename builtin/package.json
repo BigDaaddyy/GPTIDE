@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -23,54 +23,54 @@
       {
         "command": "gptide.open",
         "title": "GptIDE: 打开 AI 聊天",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.login",
         "title": "GptIDE: 使用 ChatGPT 登录",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.refresh",
         "title": "GptIDE: 重新读取项目进度",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.attachSelection",
         "title": "GptIDE: 引用当前代码",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.inlineEdit",
         "title": "GptIDE: 改写选中代码（Ctrl+K）",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.newChat",
         "title": "GptIDE: 新建对话",
-        "enablement": "workspaceFolderCount > 0"
+        "enablement": "workspaceFolderCount == 1"
       }
     ],
     "keybindings": [
       {
         "command": "gptide.open",
         "key": "ctrl+l",
-        "when": "workspaceFolderCount > 0"
+        "when": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.inlineEdit",
         "key": "ctrl+k",
-        "when": "editorTextFocus && workspaceFolderCount > 0"
+        "when": "editorTextFocus && workspaceFolderCount == 1"
       },
       {
         "command": "gptide.attachSelection",
         "key": "ctrl+shift+k",
-        "when": "editorTextFocus && workspaceFolderCount > 0"
+        "when": "editorTextFocus && workspaceFolderCount == 1"
       },
       {
         "command": "gptide.newChat",
         "key": "ctrl+shift+l",
-        "when": "workspaceFolderCount > 0"
+        "when": "workspaceFolderCount == 1"
       }
     ],
     "menus": {
@@ -87,27 +87,27 @@
       "commandPalette": [
         {
           "command": "gptide.open",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         },
         {
           "command": "gptide.login",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         },
         {
           "command": "gptide.refresh",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         },
         {
           "command": "gptide.attachSelection",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         },
         {
           "command": "gptide.inlineEdit",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         },
         {
           "command": "gptide.newChat",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         }
       ]
     },
@@ -126,7 +126,7 @@
           "id": "gptide.chat",
           "name": "Agent",
           "type": "webview",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount == 1"
         }
       ]
     },

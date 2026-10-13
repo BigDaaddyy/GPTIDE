@@ -43,7 +43,9 @@ function importProject(project, userRoot) {
       if (workspace.workspace) {
         try { const configPath = uriPath(workspace.workspace); const config = JSON.parse(fs.readFileSync(configPath, 'utf8')); folders = (config.folders || []).map(f => f.uri ? uriPath(f.uri) : path.resolve(path.dirname(configPath), f.path)); } catch { continue; }
       }
-      if (!folders.some(p => p && normalize(p) === normalize(project))) continue;
+      // A multi-root Cursor composer belongs to the workspace, not one project.
+      // Never expose that shared conversation under an individual project.
+      if (folders.length !== 1 || !folders[0] || normalize(folders[0]) !== normalize(project)) continue;
       matchedWorkspaces++;
       let db; try { db = snapshot(path.join(folder, 'state.vscdb'), temp, name + '.db'); if (db) open.push(db); } catch (e) { warnings.push(`读取工作区失败：${e.message}`); continue; }
       const index = readJson(db, 'ItemTable', 'composer.composerData');
@@ -51,6 +53,8 @@ function importProject(project, userRoot) {
       for (const header of headers) {
         const id = header.composerId || header.id; if (!id) continue;
         const composer = readJson(global, 'cursorDiskKV', 'composerData:' + id) || readJson(db, 'cursorDiskKV', 'composerData:' + id) || header;
+        const explicitOwner = composer.projectPath || header.projectPath;
+        if (typeof explicitOwner === 'string' && normalize(explicitOwner) !== normalize(project)) continue;
         const messages = extractMessages(composer, global, id);
         if (!messages.length) messages.push(...extractMessages(composer, db, id));
         if (messages.length) chats.set(id, { id: 'cursor:' + id, source: 'cursor', name: header.name || composer.name || messages[0].text.slice(0, 36), updatedAt: header.lastUpdatedAt || composer.lastUpdatedAt || composer.createdAt || 0, messages });

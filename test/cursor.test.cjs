@@ -23,3 +23,23 @@ test('exact project match, ordered messages and source database remains unchange
     assert.deepEqual(fs.readFileSync(file), original);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test('shared multi-root Cursor history and explicit foreign owners are excluded', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-isolated-'));
+  try {
+    const a = path.join(root, 'a'), b = path.join(root, 'b'), storage = path.join(root, 'workspaceStorage');
+    const config = path.join(root, 'shared.code-workspace');
+    fs.writeFileSync(config, JSON.stringify({ folders: [{ path: 'a' }, { path: 'b' }] }));
+    function fixture(name, workspace, owner) {
+      const directory = path.join(storage, name); fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, 'workspace.json'), JSON.stringify(workspace));
+      const db = new DatabaseSync(path.join(directory, 'state.vscdb')); db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY,value BLOB)');
+      db.prepare('INSERT INTO ItemTable VALUES (?,?)').run('composer.composerData', JSON.stringify({ allComposers: [{ composerId: name, projectPath: owner, conversation: [{ type: 1, text: name }] }] })); db.close();
+    }
+    fixture('shared', { workspace: pathToFileURL(config).href }, undefined);
+    fixture('foreign-owner', { folder: pathToFileURL(a).href }, b);
+    fixture('owned-a', { folder: pathToFileURL(a).href }, a);
+    fixture('owned-b', { folder: pathToFileURL(b).href }, b);
+    assert.deepEqual(importProject(a, root).chats.map(c => c.messages[0].text), ['owned-a']);
+    assert.deepEqual(importProject(b, root).chats.map(c => c.messages[0].text), ['owned-b']);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

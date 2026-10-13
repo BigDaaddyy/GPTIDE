@@ -1,10 +1,14 @@
 const api = acquireVsCodeApi(), el = id => document.getElementById(id);
-const previous = api.getState() || {};
+const projectKey = document.body.dataset.projectKey, savedState = api.getState() || {};
+const projectStates = savedState.projects || {}, previous = projectStates[projectKey] || {};
+const legacyState = savedState.projects ? savedState.legacy : savedState;
+let invalidated = false;
 const drafts = previous.drafts || {}; let draftKey, submittedDraft;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
-const post = (type, data = {}) => api.postMessage({ type, ...data });
+let tabsSignature;
+const post = (type, data = {}) => { if (!invalidated) api.postMessage({ type, projectKey, ...data }); };
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 function inline(node, text) {
   // Model HTML always remains literal text; never use innerHTML.
@@ -33,11 +37,11 @@ function content(node, text) {
 }
 function renderHistory() {
   const search = el('history-search').value.toLowerCase(); el('history-list').replaceChildren();
-  const chats = [...state.chats].filter(c => c.name.toLowerCase().includes(search)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const chats = [...(state.history || [])].filter(c => c.name.toLowerCase().includes(search)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   if (!chats.length) el('history-list').append(make('div', 'history-empty', search ? '没有匹配的对话' : '这个项目还没有聊天记录'));
   for (const chat of chats) {
     const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.busy;
-    row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.source === 'cursor' ? 'Cursor 导入' : 'GptIDE') + ` · ${chat.count} 条消息`));
+    row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
     row.onclick = () => { post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
   }
 }
@@ -102,11 +106,21 @@ function renderTasks(s) {
   for (const [id, row] of taskRows) if (!keys.has(id)) { row.node.remove(); taskRows.delete(id); }
 }
 function render(s) {
+  const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.chats.map(c => [c.id, c.name])]);
+  if (tabs !== tabsSignature) {
+    tabsSignature = tabs; el('chat-tabs').replaceChildren();
+    for (const id of s.openChatIds || []) {
+      const chat = s.chats.find(c => c.id === id); if (!chat) continue;
+      const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
+      const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
+      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy; close.onclick = () => post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); tab.append(button, close); el('chat-tabs').append(tab);
+    }
+  }
   const nextKey = s.activeId || '__new__';
   if (nextKey !== draftKey) {
     if (draftKey !== undefined) drafts[draftKey] = el('input').value;
-    const transferring = s.busy && draftKey === '__new__' && submittedDraft !== undefined;
-    const nextDraft = transferring ? el('input').value : drafts[nextKey] || (draftKey === undefined ? previous.draft || '' : '');
+    const transferring = s.busy && submittedDraft !== undefined;
+    const nextDraft = transferring ? el('input').value : drafts[nextKey] ?? s.draft ?? '';
     if (transferring) drafts[draftKey] = '';
     el('input').value = nextDraft;
     draftKey = nextKey; resizeInput();
@@ -140,8 +154,8 @@ function render(s) {
   }
   if (!el('history-panel').hidden) renderHistory();
 }
-function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; api.setState({ drafts, mode: el('mode').value }); }
-window.addEventListener('message', event => { if (event.data.type === 'state') render(event.data); if (event.data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
+function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; projectStates[projectKey] = { drafts, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
+window.addEventListener('message', event => { const data = event.data; if (data.projectKey !== projectKey || invalidated) return; if (data.type === 'reset') { invalidated = true; document.body.hidden = true; return; } if (data.type === 'state') render(data); if (data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { resizeInput(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
 el('input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!state.busy) el('send').click(); } };
