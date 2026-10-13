@@ -76,7 +76,10 @@ function crcUpdate(crc, data) { for (const b of data) crc = (crc >>> 8) ^ crcTab
 // Native installation validates engine compatibility and registers the extension.
 async function packagePlugin(plugin, file, { signal, maximumBytes = 512 * 1024 * 1024, maximumEntries = 65530 } = {}) {
   const m = plugin.manifest, entries = [], central = []; let offset = 0, total = 0;
-  const sourceRoot = fs.realpathSync(plugin.directory);
+  // Use the same native resolver for the root and every entry. Windows runners
+  // may expose temporary directories through aliases/junctions which the sync
+  // JS resolver and async native resolver represent differently.
+  const sourceRoot = await fs.promises.realpath(plugin.directory);
   if (fs.lstatSync(plugin.directory).isSymbolicLink()) throw new Error('插件包含符号链接，请通过扩展面板重新安装');
   const checkPath = async source => { const relative = path.relative(sourceRoot, await fs.promises.realpath(source)); if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative) || (await fs.promises.lstat(source)).isSymbolicLink()) throw new Error('插件目录已变化或包含符号链接'); };
   const walk = async (dir, prefix) => { for (const item of await fs.promises.readdir(dir, { withFileTypes: true })) {

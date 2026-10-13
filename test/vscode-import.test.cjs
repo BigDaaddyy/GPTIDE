@@ -72,3 +72,14 @@ test('local extension inventory and VSIX preserve installed files without touchi
     assert.equal(fs.readFileSync(path.join(plugin, '中文.txt'), 'utf8'), 'fixture');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('VSIX root and entries use one canonical resolver even when the sync resolver exposes an alias', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-path-alias-')), output = path.join(root, '..', path.basename(root) + '.vsix');
+  const original = fs.realpathSync; let syncRootReads = 0;
+  try {
+    fs.writeFileSync(path.join(root, 'package.json'), '{"name":"fixture"}');
+    fs.realpathSync = function(file, ...args) { if (path.resolve(file) === root) { syncRootReads++; return path.join(root, 'different-alias'); } return original.call(this, file, ...args); };
+    await core.packagePlugin({ directory: root, manifest: { publisher: 'test', name: 'fixture', version: '1.0.0' } }, output);
+    assert.equal(syncRootReads, 0); assert.ok(fs.statSync(output).size > 0);
+  } finally { fs.realpathSync = original; fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(output, { force: true }); }
+});
