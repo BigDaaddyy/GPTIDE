@@ -12,6 +12,7 @@ const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKe
 const taskRows = new Map(); let taskChat;
 let tabsSignature, messageAnchor = null, findPosition = 0, findHits = [], findQuery = '', findTimer, findChat, taskFilterSignature;
 const findCache = new Map();
+let quickRows = [], quickIndex = 0, quickSignature = '', quickDismissed;
 const post = (type, data = {}) => { if (!invalidated) api.postMessage({ type, projectKey, ...data }); };
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 function inline(node, text) {
@@ -216,6 +217,41 @@ function render(s) {
     }
   }
   if (!el('history-panel').hidden) renderHistory();
+  updateQuickActions();
+}
+function closeQuickActions(dismiss = false) {
+  if (dismiss) quickDismissed = el('input').value + ':' + el('input').selectionStart;
+  el('quick-actions').hidden = true; el('input').setAttribute('aria-expanded', 'false'); el('input').removeAttribute('aria-activedescendant');
+}
+function updateQuickActions() {
+  const input = el('input'), query = actionQuery(input.value, input.selectionStart, input.selectionEnd), marker = input.value + ':' + input.selectionStart;
+  const rows = quickDismissed === marker || document.activeElement !== input ? [] : matchingActions(query, { ...state, pendingSend });
+  if (!rows.length) { closeQuickActions(); quickSignature = ''; return; }
+  const signature = JSON.stringify([query, rows.map(row => row.id)]);
+  if (signature !== quickSignature) { quickSignature = signature; quickRows = rows; quickIndex = 0; el('quick-actions').replaceChildren();
+    for (const [index, action] of rows.entries()) {
+      const button = make('button', 'quick-action'), key = make('code', '', (query.kind === 'context' ? '@' : '/') + action.id), label = make('span', '', action.label);
+      button.id = 'quick-action-' + index; button.setAttribute('role', 'option'); button.tabIndex = -1; button.append(key, label);
+      button.onpointerdown = event => event.preventDefault(); button.onclick = () => performQuickAction(action, undefined, actionQuery(input.value, input.selectionStart, input.selectionEnd)); el('quick-actions').append(button);
+    }
+  }
+  el('quick-actions').hidden = false; input.setAttribute('aria-expanded', 'true'); selectQuickAction(quickIndex);
+}
+function selectQuickAction(index) {
+  quickIndex = (index + quickRows.length) % quickRows.length;
+  for (const [rowIndex, row] of [...el('quick-actions').children].entries()) { const selected = rowIndex === quickIndex; row.setAttribute('aria-selected', String(selected)); if (selected) { el('input').setAttribute('aria-activedescendant', row.id); row.scrollIntoView({ block: 'nearest' }); } }
+}
+function performQuickAction(action, remainder, query) {
+  if (!action || remainder === undefined && !query) { closeQuickActions(); return; }
+  if (!matchingActions(query || { kind: 'command', query: action.id }, { ...state, pendingSend }).some(item => item.id === action.id)) return;
+  const input = el('input'); closeQuickActions(); quickSignature = ''; quickDismissed = undefined;
+  input.value = remainder !== undefined ? remainder : query ? input.value.slice(0, query.start) + input.value.slice(query.end) : '';
+  if (query) input.setSelectionRange(query.start, query.start);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (action.mode) { el('mode').value = action.mode; el('mode').dispatchEvent(new Event('change')); }
+  else if (action.action === 'find') { showFind(); return; }
+  else { flushDraft(); if (action.action === 'new') beginTabChange(); post(action.action); }
+  if (!pendingTabChange) input.focus();
 }
 function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
 function flushDraft() { clearTimeout(draftTimer); if (draftKey === undefined || draftKey === '__new__' || invalidated) return; post('draft', { id: draftKey, text: el('input').value, sequence: ++draftSequence }); }
@@ -238,9 +274,26 @@ window.addEventListener('message', event => {
   if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; }
 });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
-el('input').addEventListener('input', () => { inputRevision++; resizeInput(); scheduleDraft(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
-el('input').onkeydown = e => { const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey; if (e.key === 'Enter' && sendKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!state.busy) el('send').click(); } };
-el('send').onclick = () => { if (state.busy) { post('stop'); return; } if (pendingSend) return; const text = el('input').value.trim(); if (text) { flushDraft(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('send', { text, mode: el('mode').value, clientSendId: submittedSendId }); } };
+el('input').addEventListener('input', () => { inputRevision++; quickDismissed = undefined; resizeInput(); scheduleDraft(); updateQuickActions(); });
+el('input').addEventListener('click', updateQuickActions); el('input').addEventListener('focus', updateQuickActions);
+el('input').addEventListener('blur', () => closeQuickActions());
+el('input').addEventListener('keyup', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) updateQuickActions(); });
+el('input').onkeydown = e => {
+  if (e.isComposing || e.keyCode === 229) return;
+  if (!el('quick-actions').hidden) {
+    if (['ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); selectQuickAction(quickIndex + (e.key === 'ArrowDown' ? 1 : -1)); return; }
+    if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); performQuickAction(quickRows[quickIndex], undefined, actionQuery(el('input').value, el('input').selectionStart, el('input').selectionEnd)); return; }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuickActions(true); return; }
+  }
+  const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey;
+  if (e.key === 'Enter' && sendKey && !e.shiftKey) { e.preventDefault(); if (!state.busy) el('send').click(); }
+};
+el('send').onclick = () => {
+  if (state.busy) { post('stop'); return; } if (pendingSend) return;
+  const parsed = commandAction(el('input').value);
+  if (parsed && matchingActions({ kind: 'command', query: parsed.action.id }, state).some(action => action.id === parsed.action.id)) { performQuickAction(parsed.action, parsed.remainder); if (!parsed.action.mode || !el('input').value.trim()) return; }
+  const text = el('input').value.trim(); if (text) { flushDraft(); closeQuickActions(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('send', { text, mode: el('mode').value, clientSendId: submittedSendId }); }
+};
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };
@@ -257,7 +310,7 @@ el('model').onchange = () => post('model', { value: el('model').value }); el('ef
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; if (!el('find-bar').hidden) closeFind(); } });
-document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; });
+document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
 el('chat-tabs').addEventListener('keydown', e => {
   if (state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
   const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;

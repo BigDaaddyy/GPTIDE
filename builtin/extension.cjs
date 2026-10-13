@@ -510,7 +510,7 @@ class Chat {
     this.view = view; view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(this.context.extensionPath)] };
     const nonce = crypto.randomBytes(20).toString('hex');
     const source = name => fs.readFileSync(path.join(this.context.extensionPath, name), 'utf8');
-    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__FIND__', () => source('find.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
+    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__FIND__', () => source('find.cjs')).replace('__ACTIONS__', () => source('quick-actions.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
     view.webview.onDidReceiveMessage(async msg => {
       if (this.invalidated || msg.projectKey !== this.projectKey) return;
       if (msg.type !== 'ready') { await this.ready; if (this.invalidated) return; }
