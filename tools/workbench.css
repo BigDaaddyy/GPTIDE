@@ -1,0 +1,13 @@
+/* Keep the native Explorer/Search/SCM bar inside the resizable sidebar. */
+.monaco-workbench .part.sidebar > .header-or-footer > .composite-bar-container,
+.monaco-workbench .part.sidebar > .title.has-composite-bar > .composite-bar-container {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+}
+
+.monaco-workbench .part.sidebar > :is(.header-or-footer, .title.has-composite-bar) > .composite-bar-container > .composite-bar {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}

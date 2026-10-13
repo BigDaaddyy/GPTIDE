@@ -3,12 +3,18 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const app = path.join(root, 'app');
 if (!fs.existsSync(path.join(app, 'VSCodium.exe'))) throw new Error('请先解压官方 VSCodium 完整 Windows 运行包到 app 目录');
+// Reproducible native styling; replace our block instead of accumulating it.
+const workbenchCss = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.css');
+const styleStart = '/* GPTIDE WORKBENCH START */', styleEnd = '/* GPTIDE WORKBENCH END */';
+const originalCss = fs.readFileSync(workbenchCss, 'utf8').replace(/\n?\/\* GPTIDE WORKBENCH START \*\/[\s\S]*?\/\* GPTIDE WORKBENCH END \*\//g, '');
+fs.writeFileSync(workbenchCss, originalCss + '\n' + styleStart + '\n' + fs.readFileSync(path.join(__dirname, 'workbench.css'), 'utf8') + '\n' + styleEnd);
 const target = path.join(app, 'resources', 'app', 'extensions', 'gptide-chat');
 fs.mkdirSync(target, { recursive: true });
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(path.join(root, 'builtin', name), path.join(target, name));
 const runtime = path.join(root, 'runtime'); fs.mkdirSync(runtime, { recursive: true }); fs.copyFileSync(process.execPath, path.join(runtime, 'node.exe'));
 const productFile = path.join(app, 'resources', 'app', 'product.json'); const product = JSON.parse(fs.readFileSync(productFile, 'utf8'));
 Object.assign(product, { nameShort: 'GptIDE', nameLong: 'GptIDE', applicationName: 'gptide', dataFolderName: '.gptide', win32AppUserModelId: 'GptIDE.Desktop', urlProtocol: 'gptide' });
+if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.css'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchCss)).digest('base64').replace(/=+$/, '');
 fs.writeFileSync(productFile, JSON.stringify(product, null, 2));
 const manifestCache = path.join(root, 'data', 'user', 'CachedProfilesData', '__default__profile__', 'extensions.builtin.cache');
 if (fs.existsSync(manifestCache)) fs.unlinkSync(manifestCache);
