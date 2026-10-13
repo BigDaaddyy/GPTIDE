@@ -1,7 +1,8 @@
 const api = acquireVsCodeApi(), el = id => document.getElementById(id);
 const previous = api.getState() || {};
 const drafts = previous.drafts || {}; let draftKey, submittedDraft;
-let state = { busy: false, chats: [], messages: [] }, messageSignature = '', optionsSignature = '', reviewSignature = '';
+let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
+const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const post = (type, data = {}) => api.postMessage({ type, ...data });
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 function inline(node, text) {
@@ -40,25 +41,43 @@ function renderHistory() {
   }
 }
 function renderMessages(s) {
-  const signature = JSON.stringify([s.activeId, s.messages]); if (signature === messageSignature) return;
-  const switched = state.activeId !== s.activeId; messageSignature = signature;
-  const box = el('messages'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100, oldTop = box.scrollTop; box.replaceChildren();
+  const chatKey = s.activeId || '__new__', switched = renderedChat !== chatKey;
+  if (switched) { renderedChat = chatKey; visibleMessages = 100; }
+  const box = el('messages'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100, oldTop = box.scrollTop;
+  const nextLayout = JSON.stringify([chatKey, s.source, !s.messages.length]);
+  if (nextLayout !== layoutKey) { box.replaceChildren(); messageRows.clear(); layoutKey = nextLayout; }
   if (!s.messages.length) {
+    if (box.children.length) return;
     const empty = make('section', 'empty'); empty.append(make('h2', '', '从这里继续构建'), make('p', '', s.cursorCount ? `已读取 ${s.cursorCount} 条 Cursor 对话，在历史中选择即可继续。` : '打开项目，引用文件，把想做的事情写下来。'));
     for (const [title, prompt] of [['了解这个项目', '请分析这个项目的结构、运行方式和当前进度。'], ['规划下一步', '请先阅读项目，给出下一步改进计划和验证步骤。'], ['检查代码问题', '请检查项目中的明确错误，并给出具体文件与修复建议。']]) {
       const suggestion = make('button', 'suggestion', title); suggestion.append(make('span', '', '↗')); suggestion.onclick = () => { el('input').value = prompt; el('input').focus(); resizeInput(); }; empty.append(suggestion);
     }
     box.append(empty);
   }
-  if (s.source === 'cursor') box.append(make('div', 'source', 'Cursor 历史已加载。下一条消息会以此为背景创建新的 GptIDE 对话。'));
-  for (const message of s.messages) {
+  if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor 历史已加载。下一条消息会以此为背景创建新的 GptIDE 对话。'));
+  const start = Math.max(0, s.messages.length - visibleMessages);
+  let more = box.querySelector('.load-older');
+  if (start && !more) { more = make('button', 'load-older text-button'); box.prepend(more); }
+  if (more) { more.hidden = !start; more.textContent = `加载更早的消息（还有 ${start} 条）`; more.onclick = () => { const height = box.scrollHeight, top = box.scrollTop; visibleMessages += 100; renderMessages(state); box.scrollTop = top + box.scrollHeight - height; }; }
+  const visible = new Set();
+  for (let index = start; index < s.messages.length; index++) {
+    const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
+    const signature = JSON.stringify(message); let row = messageRows.get(key);
+    if (row && row.signature === signature) continue;
+    if (row) {
+      row.body.replaceChildren(); content(row.body, message.text); row.signature = signature; row.message = message; continue;
+    }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GptIDE');
     if (message.mode) role.append(make('span', 'badge', message.mode));
-    const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: message.text }); role.append(copy);
+    const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    box.append(item);
+    row = { item, body, signature, message }; messageRows.set(key, row);
   }
+  for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
+  // Reconcile order without detaching stable rows during token streaming.
+  const ordered = [...visible].map(key => messageRows.get(key).item);
+  for (let i = ordered.length - 1, next = null; i >= 0; i--) { const item = ordered[i]; if (item.parentNode !== box || item.nextSibling !== next) box.insertBefore(item, next); next = item; }
   if (atBottom || switched) box.scrollTop = box.scrollHeight; else box.scrollTop = oldTop;
   el('scroll-bottom').hidden = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
 }
