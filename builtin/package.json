@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -20,6 +20,10 @@
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "gptide.importVSCode",
+        "title": "GptIDE: 导入 VS Code 设置和插件"
+      },
       {
         "command": "gptide.open",
         "title": "GptIDE: 打开 AI 聊天",

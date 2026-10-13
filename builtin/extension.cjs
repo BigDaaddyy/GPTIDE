@@ -359,6 +359,7 @@ class Chat {
   dispose() { clearTimeout(this.postTimer); this.save(); this.bridge?.dispose(); }
 }
 function activate(context) {
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.importVSCode', () => require('./vscode-import-ui.cjs').run(vscode, path.resolve(context.extensionPath, '../../../../..')).catch(e => vscode.window.showErrorMessage(e.message))));
   let chat;
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => { chat?.invalidateProject(); vscode.commands.executeCommand('workbench.action.reloadWindow'); }));
   if (vscode.workspace.workspaceFolders?.length !== 1) return;
