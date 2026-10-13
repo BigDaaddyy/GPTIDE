@@ -163,7 +163,7 @@ el('send').onclick = () => { if (state.busy) { post('stop'); return; } const tex
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
-for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage']) el(id).onclick = () => { post(id); el('menu').hidden = true; if (id === 'new') el('input').focus(); };
+for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder']) el(id).onclick = () => { post(id); el('menu').hidden = true; if (id === 'new') el('input').focus(); };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => el('messages').scrollTop = el('messages').scrollHeight;

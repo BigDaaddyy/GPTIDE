@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -77,6 +77,21 @@
       {
         "command": "gptide.diagnostics",
         "title": "GptIDE: 本机诊断"
+      },
+      {
+        "command": "gptide.attachDiagnostics",
+        "title": "GptIDE: 引用项目诊断",
+        "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.attachGitDiff",
+        "title": "GptIDE: 引用 Git 差异",
+        "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.attachFolder",
+        "title": "GptIDE: 引用文件夹",
+        "enablement": "workspaceFolderCount == 1"
       }
     ],
     "keybindings": [
@@ -140,6 +155,25 @@
         {
           "command": "gptide.newChat",
           "when": "workspaceFolderCount == 1"
+        },
+        {
+          "command": "gptide.attachDiagnostics",
+          "when": "workspaceFolderCount == 1"
+        },
+        {
+          "command": "gptide.attachGitDiff",
+          "when": "workspaceFolderCount == 1"
+        },
+        {
+          "command": "gptide.attachFolder",
+          "when": "workspaceFolderCount == 1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "gptide.attachFolder",
+          "when": "explorerResourceIsFolder && workspaceFolderCount == 1",
+          "group": "gptide@1"
         }
       ]
     },

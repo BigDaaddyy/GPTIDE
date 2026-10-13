@@ -106,23 +106,54 @@ class Chat {
   }
   async attachFiles(current = false) {
     if (!this.project || this.busy) return;
+    const targetId = this.activeId;
     if (current) {
       const editor = vscode.window.activeTextEditor;
       if (!editor || !review.within(this.project, editor.document.uri.fsPath)) throw new Error('请先打开本项目中的一个文件');
       const selected = !editor.selection.isEmpty;
       const attachment = { id: crypto.randomUUID(), path: editor.document.uri.fsPath, label: path.basename(editor.document.fileName) + (selected ? `:${editor.selection.start.line + 1}-${editor.selection.end.line + 1}` : ''), text: selected ? editor.document.getText(editor.selection) : editor.document.getText() };
+      attachment.truncated = attachment.text.length > 100000; attachment.text = attachment.text.slice(0, 100000);
+      this.attachments = this.attachments.filter(a => a.path !== attachment.path || a.label !== attachment.label);
+      if (this.attachments.length >= 20) throw new Error('最多引用 20 项上下文');
       this.attachments.push(attachment);
     } else {
       const files = await vscode.workspace.findFiles('**/*', '**/{.git,node_modules,dist,build,.next,.venv}/**', 2000);
       const picked = await vscode.window.showQuickPick(files.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { canPickMany: true, placeHolder: '搜索项目文件，作为上下文附到当前消息' });
-      for (const item of picked || []) {
+      if (this.invalidated || this.activeId !== targetId) return;
+      for (const item of (picked || []).slice(0, 20)) {
+        if (this.attachments.length >= 20) { vscode.window.showInformationMessage('最多引用 20 项上下文'); break; }
         if (!review.within(this.project, item.uri.fsPath)) continue;
         const text = review.readText(item.uri.fsPath);
         if (text === undefined || text === null) { vscode.window.showInformationMessage(`${item.label} 不是可读取的小型文本文件`); continue; }
-        if (!this.attachments.some(a => a.path === item.uri.fsPath)) this.attachments.push({ id: crypto.randomUUID(), path: item.uri.fsPath, label: item.label, text });
+        if (!this.attachments.some(a => a.path === item.uri.fsPath)) this.attachments.push({ id: crypto.randomUUID(), path: item.uri.fsPath, label: item.label, text: text.slice(0, 100000), truncated: text.length > 100000 });
       }
     }
     this.post();
+  }
+  async attachContext(kind, folderUri) {
+    await this.ready;
+    if (this.busy || this.invalidated || !this.project) return;
+    const core = require('./context.cjs'), targetId = this.activeId; let text, label;
+    if (kind === 'diagnostics') {
+      text = core.diagnostics(this.project, vscode.languages.getDiagnostics()); label = '项目诊断';
+      if (!text) return vscode.window.showInformationMessage('当前项目没有错误或警告');
+    } else if (kind === 'git') {
+      const selected = await vscode.window.showQuickPick(['未暂存差异', '暂存区差异'], { title: '引用 Git 差异' }); if (!selected) return;
+      text = await core.gitDiff(this.project, selected === '暂存区差异'); label = selected;
+      if (!text.trim()) return vscode.window.showInformationMessage('所选范围没有 Git 差异');
+    } else if (kind === 'folder') {
+      if (!folderUri) { const selected = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(this.project), canSelectFiles: false, canSelectFolders: true, canSelectMany: false }); folderUri = selected?.[0]; }
+      if (!folderUri) return;
+      if (folderUri.scheme !== 'file' || !review.within(this.project, folderUri.fsPath)) throw new Error('文件夹不属于当前项目');
+      const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folderUri, '**/*'), '**/{.git,node_modules,dist,build,.next,.venv,__pycache__}/**', 200);
+      const result = core.folderText(this.project, folderUri.fsPath, files.map(uri => uri.fsPath));
+      if (!result.count) return vscode.window.showInformationMessage('文件夹没有可引用的文本文件');
+      text = result.text; label = `${path.relative(this.project, folderUri.fsPath) || path.basename(this.project)}/ · ${result.count} 文件${result.limited ? '（部分）' : ''}`;
+    } else return;
+    if (this.invalidated || targetId !== this.activeId) return;
+    this.attachments = this.attachments.filter(a => a.kind !== kind || a.label !== label);
+    if (this.attachments.length >= 20) throw new Error('最多引用 20 项上下文');
+    this.attachments.push(core.attachment(kind, label, text, this.project)); this.post();
   }
   async showDiff(file) {
     const change = this.changes?.find(c => c.path === file); if (!change || !review.within(this.project, file)) return;
@@ -258,14 +289,14 @@ class Chat {
         this.chats.find(c => c.id === this.activeId).threadId = this.threadId;
       }
       let editorContext = '';
-      if (attach && vscode.window.activeTextEditor) {
+      if (attach && vscode.window.activeTextEditor && review.within(this.project, vscode.window.activeTextEditor.document.uri.fsPath)) {
         const editor = vscode.window.activeTextEditor;
         const content = editor.selection.isEmpty ? editor.document.getText() : editor.document.getText(editor.selection);
         editorContext = `\n\n当前编辑器文件：${editor.document.uri.fsPath}\n${content.slice(0, 50000)}`;
       }
       const labels = this.attachments.map(a => a.label); let budget = 100000;
-      for (const attachment of this.attachments) { if (budget <= 0) break; const snippet = attachment.text.slice(0, Math.min(50000, budget)); budget -= snippet.length; editorContext += `\n\n引用文件：${attachment.path}\n${snippet}`; }
-      if (this.attachments.some(a => a.text.length > 50000) || budget <= 0) this.importWarning = '文件上下文最多附上约 10 万字符，长文件已截断。';
+      for (const attachment of this.attachments) { if (budget <= 0) break; const snippet = attachment.text.slice(0, Math.min(50000, budget)); budget -= snippet.length; editorContext += `\n\n引用${attachment.kind ? '上下文' : '文件'}：${attachment.kind ? attachment.label : attachment.path}\n${snippet}`; }
+      if (this.attachments.some(a => a.truncated || a.text.length > 50000) || budget <= 0) this.importWarning = '引用上下文最多附上约 10 万字符，长内容已截断。';
       this.baseline = mode === 'agent' ? review.snapshot(this.project) : null; this.candidates = new Map();
       const active = this.chats.find(c => c.id === this.activeId); active.tasks ||= []; this.tasks = active.tasks; active.taskTurn = (active.taskTurn || 0) + 1; this.currentTaskTurn = active.taskTurn;
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
@@ -340,6 +371,9 @@ class Chat {
         if (msg.type === 'effort' && !this.busy && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
         if (msg.type === 'attach') await this.attachFiles();
         if (msg.type === 'attachCurrent') await this.attachFiles(true);
+        if (msg.type === 'attachDiagnostics') await this.attachContext('diagnostics');
+        if (msg.type === 'attachGitDiff') await this.attachContext('git');
+        if (msg.type === 'attachFolder') await this.attachContext('folder');
         if (msg.type === 'removeAttachment') { this.attachments = this.attachments.filter(a => a.id !== msg.id); this.post(); }
         if (msg.type === 'rename') await this.renameChat();
         if (msg.type === 'delete') await this.deleteChat();
@@ -396,6 +430,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; await chat.importCursor(); chat.select(chat.activeId); }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.contextBefore?.get(uri.path.slice(1)) || '' }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));
+  for (const [command, kind] of [['gptide.attachDiagnostics', 'diagnostics'], ['gptide.attachGitDiff', 'git'], ['gptide.attachFolder', 'folder']]) context.subscriptions.push(vscode.commands.registerCommand(command, uri => chat.attachContext(kind, uri).catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.inlineEdit', () => chat.inlineEdit().catch(error => vscode.window.showErrorMessage(error.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.newChat', async () => { await chat.ready; if (!chat.busy) { chat.newChat(); vscode.commands.executeCommand('gptide.chat.focus'); } }));
   vscode.commands.executeCommand('gptide.chat.focus');
