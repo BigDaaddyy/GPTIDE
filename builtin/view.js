@@ -3,9 +3,10 @@ const projectKey = document.body.dataset.projectKey, savedState = api.getState()
 const projectStates = savedState.projects || {}, previous = projectStates[projectKey] || {};
 const legacyState = savedState.projects ? savedState.legacy : savedState;
 let invalidated = false;
-const drafts = previous.drafts || {}; let draftKey, submittedDraft;
+const drafts = previous.drafts || {}; let draftKey, submittedDraft, submittedSendId, submittedInputRevision;
+const sendPrefix = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); let sendSequence = 0, inputRevision = 0;
 const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0, pendingFocusChat;
-let pendingTabChange = false;
+let pendingTabChange = false, pendingSend = false;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
@@ -151,6 +152,7 @@ function renderTasks(s) {
   for (const [id, row] of taskRows) if (!keys.has(id)) { row.node.remove(); taskRows.delete(id); }
 }
 function render(s) {
+  if (s.busy && !s.loadingScope) pendingSend = false;
   const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.reviewBusy, s.chats.map(c => [c.id, c.name])]);
   if (tabs !== tabsSignature) {
     tabsSignature = tabs; el('chat-tabs').replaceChildren();
@@ -189,7 +191,7 @@ function render(s) {
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
   for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
-  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked;
+  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked || pendingSend;
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
     optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));
@@ -219,11 +221,26 @@ function resizeInput() { el('input').style.height = 'auto'; el('input').style.he
 function flushDraft() { clearTimeout(draftTimer); if (draftKey === undefined || draftKey === '__new__' || invalidated) return; post('draft', { id: draftKey, text: el('input').value, sequence: ++draftSequence }); }
 function beginTabChange() { pendingTabChange = true; el('input').disabled = true; }
 function scheduleDraft() { clearTimeout(draftTimer); el('draft-state').textContent = el('input').value ? '草稿…' : ''; draftTimer = setTimeout(flushDraft, 650); }
-window.addEventListener('message', event => { const data = event.data; if (data.projectKey !== projectKey || invalidated) return; if (data.type === 'reset') { clearTimeout(draftTimer); invalidated = true; document.body.hidden = true; return; } if (data.type === 'tabChangePending') beginTabChange(); if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope; } if (data.type === 'state') render(data); if (data.type === 'draftSaved') { if (data.history) { state.history = data.history; if (!el('history-panel').hidden) renderHistory(); } if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存'; } if (data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); flushDraft(); } });
+window.addEventListener('message', event => {
+  const data = event.data; if (!data || data.projectKey !== projectKey || invalidated) return;
+  if (data.type === 'reset') { clearTimeout(draftTimer); invalidated = true; document.body.hidden = true; return; }
+  if (data.type === 'tabChangePending') beginTabChange();
+  if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope || !!state.storageBlocked; }
+  if (data.type === 'state') render(data);
+  if (data.type === 'draftSaved') {
+    if (data.history) { state.history = data.history; if (!el('history-panel').hidden) renderHistory(); }
+    if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存';
+  }
+  if (data.type === 'sent' && (data.clientSendId === undefined || data.clientSendId === submittedSendId)) {
+    if ((!data.id || data.id === draftKey) && inputRevision === submittedInputRevision && el('input').value === submittedDraft) el('input').value = '';
+    pendingSend = false; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; resizeInput(); flushDraft();
+  }
+  if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; }
+});
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
-el('input').addEventListener('input', () => { resizeInput(); scheduleDraft(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
+el('input').addEventListener('input', () => { inputRevision++; resizeInput(); scheduleDraft(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
 el('input').onkeydown = e => { const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey; if (e.key === 'Enter' && sendKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!state.busy) el('send').click(); } };
-el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { flushDraft(); submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
+el('send').onclick = () => { if (state.busy) { post('stop'); return; } if (pendingSend) return; const text = el('input').value.trim(); if (text) { flushDraft(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('send', { text, mode: el('mode').value, clientSendId: submittedSendId }); } };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };

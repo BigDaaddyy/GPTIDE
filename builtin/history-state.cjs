@@ -8,6 +8,7 @@ function chats(value) {
   for (const chat of value) {
     if (!object(chat) || !string(chat.id) || !chat.id || seen.has(chat.id)) invalid('对话标识'); seen.add(chat.id);
     for (const field of ['projectKey', 'threadId', 'name', 'draft', 'source', 'activeCheckpointId']) optional(chat, field, string);
+    optional(chat, 'draftVersion', value => Number.isSafeInteger(value) && value >= 0);
     optional(chat, 'messages', list => Array.isArray(list) && list.every(message => object(message) && (message.text === undefined || string(message.text)) && (message.role === undefined || string(message.role)) && (message.attachments === undefined || strings(message.attachments))));
     optional(chat, 'tasks', list => Array.isArray(list) && list.every(task => object(task) && (task.files === undefined || strings(task.files)) && ['id', 'turnId', 'kind', 'title', 'status', 'output'].every(field => task[field] === undefined || string(task[field]))));
     optional(chat, 'changes', list => Array.isArray(list) && list.every(change => object(change) && ['path', 'relative', 'status'].every(field => change[field] === undefined || string(change[field])) && ['before', 'after'].every(field => change[field] === undefined || change[field] === null || string(change[field]))));

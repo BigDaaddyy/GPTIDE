@@ -152,3 +152,57 @@ test('terminal errors retain partial file checkpoints and mark unfinished tasks 
     chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } }); assert.equal(chat.chats[0].checkpoints.length, 1); assert.equal(chat.status, 'fixture disconnection');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('same text retyped after submission and next attachments survive late acknowledgment', async () => {
+  const chat = fixture(); let complete;
+  chat.attachments = [{ id: 'sent', label: 'sent', text: 'fixture' }];
+  chat.connect = async () => ({ call: () => new Promise(resolve => { complete = resolve; }) });
+  const pending = chat.send('submitted', 'ask', false, 'client-one'); await Promise.resolve(); await Promise.resolve();
+  chat.persistDraft('one', 'changed'); chat.persistDraft('one', 'submitted'); chat.attachments.push({ id: 'next', label: 'next', text: 'next fixture' });
+  complete({ turn: { id: 'turn' } }); await pending;
+  assert.equal(chat.chats[0].draft, 'submitted'); assert.deepEqual(chat.attachments.map(a => a.id), ['next']);
+});
+
+test('old RPC acknowledgment cannot overwrite a newer active turn', async () => {
+  const chat = fixture(), complete = [], acknowledgments = []; chat.tasks = [];
+  chat.view.webview.postMessage = value => { if (value.type === 'sent') acknowledgments.push(value.clientSendId); };
+  chat.connect = async () => ({ call: () => new Promise(resolve => complete.push(resolve)) });
+  const first = chat.send('submitted', 'ask', false, 'first'); await Promise.resolve(); await Promise.resolve();
+  chat.onNotification({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'first-turn' } } }); assert.deepEqual(acknowledgments, ['first']);
+  chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'first-turn', status: 'completed' } } });
+  chat.persistDraft('one', 'next'); const second = chat.send('next', 'ask', false, 'second'); await Promise.resolve(); await Promise.resolve();
+  chat.onNotification({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'second-turn' } } }); chat.persistDraft('one', 'later draft');
+  complete[0]({ turn: { id: 'first-turn' } }); await first; assert.equal(chat.turnId, 'second-turn'); assert.equal(chat.busy, true); assert.equal(chat.chats[0].draft, 'later draft');
+  complete[1]({ turn: { id: 'second-turn' } }); await second; assert.deepEqual(acknowledgments, ['first', 'second']); assert.equal(chat.chats[0].draft, 'later draft');
+});
+
+test('cancel during thread lookup starts no turn and confirmation timeout preserves running task', async () => {
+  const chat = fixture(); chat.resumed = false; let lookup, turnCalls = 0;
+  chat.connect = async () => ({ call: method => { if (method === 'thread/read') return new Promise(resolve => { lookup = resolve; }); turnCalls++; throw new Error('No turn may start'); } });
+  const canceled = chat.send('submitted', 'ask', false); await Promise.resolve(); await Promise.resolve(); chat.cancelPendingSend = true; lookup({ thread: { cwd: chat.project } });
+  await assert.rejects(canceled, /已取消/); assert.equal(turnCalls, 0); assert.equal(chat.busy, false);
+  chat.resumed = true; let reject;
+  chat.connect = async () => ({ call: () => new Promise((resolve, failed) => { reject = failed; }) });
+  const running = chat.send('submitted', 'ask', false); await Promise.resolve(); await Promise.resolve();
+  chat.onNotification({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'running' } } }); reject(new Error('RPC timeout')); await running;
+  assert.equal(chat.busy, true); assert.equal(chat.turnId, 'running'); assert.equal(chat.status, '任务已启动，等待后续状态');
+});
+
+test('old RPC failure leaves newer send state intact', async () => {
+  const chat = fixture(); let rejectFirst, resolveSecond, calls = 0; chat.tasks = [];
+  chat.connect = async () => ({ call: () => ++calls === 1 ? new Promise((resolve, reject) => { rejectFirst = reject; }) : new Promise(resolve => { resolveSecond = resolve; }) });
+  const first = chat.send('submitted', 'ask', false); await Promise.resolve(); await Promise.resolve();
+  chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'first', status: 'completed' } } });
+  chat.persistDraft('one', 'next'); const second = chat.send('next', 'ask', false); await Promise.resolve(); await Promise.resolve();
+  rejectFirst(new Error('old RPC failure')); await first; assert.equal(chat.busy, true); assert.equal(chat.status, '正在思考');
+  resolveSecond({ turn: { id: 'second' } }); await second; assert.equal(chat.turnId, 'second');
+});
+
+test('long Cursor import confirmation keeps conversation locked and cancellation preserves source', async () => {
+  const chat = fixture(); chat.chats[0].source = 'cursor'; chat.chats[0].messages = [{ role: 'user', text: 'x'.repeat(200000) }]; let answer, calls = 0;
+  chat.connect = async () => ({ call: async () => { calls++; throw new Error('No turn should start'); } });
+  vscode.window.showWarningMessage = () => new Promise(resolve => { answer = resolve; });
+  const pending = chat.send('submitted', 'ask', false); await Promise.resolve(); await Promise.resolve();
+  assert.equal(chat.busy, true); chat.newChat(); assert.equal(chat.activeId, 'one'); answer(undefined); await pending;
+  assert.equal(chat.busy, false); assert.equal(calls, 0); assert.equal(chat.chats.length, 1); assert.equal(chat.chats[0].source, 'cursor'); assert.equal(chat.chats[0].draft, 'submitted');
+});

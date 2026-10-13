@@ -147,7 +147,7 @@ class Chat {
   persistDraft(id, text) {
     if (this.invalidated || typeof text !== 'string') return false;
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (!chat) return false;
-    chat.draft = text.slice(0, 100000); chat.draftUpdatedAt = Date.now();
+    chat.draft = text.slice(0, 100000); chat.draftUpdatedAt = Date.now(); chat.draftVersion = (chat.draftVersion || 0) + 1;
     try { if (!this.drafts) throw new Error('草稿文件不可用'); this.drafts.set(id, chat.draft, chat.draftUpdatedAt); return true; }
     catch (error) { this.draftWarning = '草稿未保存：' + error.message; this.post(); return false; }
   }
@@ -351,7 +351,7 @@ class Chat {
     this.status = this.account ? `ChatGPT ${(this.account.plan || '').toUpperCase()} 已连接` : '请使用 ChatGPT 登录'; this.post();
   }
   async login() { await this.ready; const bridge = await this.connect(); const result = await bridge.call('account/login/start', { type: 'chatgpt' }); if (result.authUrl) await vscode.env.openExternal(vscode.Uri.parse(result.authUrl)); this.status = '请在浏览器完成 ChatGPT 登录'; this.post(); }
-  async send(text, mode, attach) {
+  async send(text, mode, attach, clientSendId) {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换。');
     if (this.storageBlocked) throw new Error(this.historyWarning);
@@ -360,16 +360,21 @@ class Chat {
     if (this.busy || typeof text !== 'string' || !text.trim()) return;
     if (!['ask', 'agent', 'plan'].includes(mode)) throw new Error('未知工作模式');
     if (!this.project) throw new Error('请先打开项目文件夹');
-    const submittedChatId = this.activeId, submittedDraftText = this.chats.find(c => c.id === submittedChatId)?.draft || '';
+    const submittedChatId = this.activeId, submitted = this.chats.find(c => c.id === submittedChatId && c.projectKey === this.projectKey);
+    if (!submitted) throw new Error('当前对话归属无法确认');
+    const submittedDraftText = submitted.draft || '', submittedDraftVersion = submitted.draftVersion || 0, epoch = Symbol('send');
+    const isCurrent = () => this.sendEpoch === epoch && !this.invalidated;
+    const check = () => { if (!isCurrent()) throw new Error('发送状态已失效'); if (this.cancelPendingSend) throw new Error('已取消发送'); };
     if (mode === 'agent' && !vscode.workspace.isTrusted) throw new Error('请先在 VS Code 的工作区信任中信任此项目，或使用 Ask / Plan 只读模式');
-    this.busy = true; this.cancelPendingSend = false; this.status = '正在准备'; this.post();
+    this.sendEpoch = epoch; this.busy = true; this.cancelPendingSend = false; this.status = '正在准备'; this.post();
     let bridge;
     try {
       bridge = await this.connect();
+      check();
       if (this.invalidated || submittedChatId !== this.activeId) throw new Error('项目或对话已切换，已取消发送');
       if (this.cancelPendingSend) throw new Error('已取消发送');
       if (!this.account || !['chatgpt', 'chatgptAuthTokens'].includes(this.account.type)) throw new Error('请先使用 ChatGPT 账号登录');
-    } catch (error) { this.busy = false; const failure = this.cancelPendingSend ? new Error('已取消发送') : error; this.status = failure.message; this.post(); throw failure; }
+    } catch (error) { if (!isCurrent()) return; this.busy = false; const failure = this.cancelPendingSend ? new Error('已取消发送') : error; this.status = failure.message; this.post(); throw failure; }
     this.mode = mode; this.busy = true; this.status = '正在思考'; this.activity = ''; this.post();
     try {
       let importedContext = '';
@@ -379,20 +384,20 @@ class Chat {
           const transcript = selected.messages.map(m => `[${m.role}]\n${m.text}`).join('\n\n');
           const importLimit = preferences.values(vscode.workspace.getConfiguration('gptide')).importLimit;
           if (transcript.length > importLimit) {
-            this.busy = false; this.post();
             const answer = await vscode.window.showWarningMessage(`这段 Cursor 历史较长。继续时将发送最近 ${importLimit.toLocaleString()} 字符作为背景，完整记录仍可查看。`, { modal: true }, '继续');
-            if (!answer) return; this.busy = true;
+            check(); if (answer !== '继续') { this.busy = false; this.status = '已取消发送'; this.post(); return; }
           }
           importedContext = '以下是从 Cursor 导入的历史对话，仅作为项目背景。请以用户当前请求为准。\n' + transcript.slice(-importLimit) + '\n\n当前请求：\n';
         }
-        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], updatedAt: Date.now() };
+        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, draftVersion: selected?.draftVersion || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], updatedAt: Date.now() };
         this.chats.unshift(chat); if (!this.openChatIds.includes(chat.id)) this.openChatIds.push(chat.id); this.activeId = chat.id; this.messages = chat.messages; this.threadId = null; this.resumed = false;
       }
       const named = this.chats.find(c => c.id === this.activeId); if (named?.name === '新对话' && !named.messages.length) named.name = text.slice(0, 40);
       if (!this.resumed) {
-        if (this.threadId) { const previous = await bridge.call('thread/read', { threadId: this.threadId, includeTurns: false }); if (!projectScope.matches(previous.thread?.cwd, this.project)) throw new Error('对话不属于当前项目，已拒绝继续。'); }
+        if (this.threadId) { const previous = await bridge.call('thread/read', { threadId: this.threadId, includeTurns: false }); check(); if (!projectScope.matches(previous.thread?.cwd, this.project)) throw new Error('对话不属于当前项目，已拒绝继续。'); }
         const params = { cwd: this.project, model: this.model, approvalPolicy: preferences.values(vscode.workspace.getConfiguration('gptide')).approvalPolicy, sandbox: mode === 'agent' ? 'workspace-write' : 'read-only' };
         const result = await bridge.call(this.threadId ? 'thread/resume' : 'thread/start', this.threadId ? { ...params, threadId: this.threadId } : params);
+        check();
         this.threadId = result.thread.id; this.resumed = true;
         this.chats.find(c => c.id === this.activeId).threadId = this.threadId;
       }
@@ -402,6 +407,7 @@ class Chat {
         const content = editor.selection.isEmpty ? editor.document.getText() : editor.document.getText(editor.selection);
         editorContext = `\n\n当前编辑器文件：${editor.document.uri.fsPath}\n${content.slice(0, 50000)}`;
       }
+      check(); const submittedAttachmentIds = new Set(this.attachments.map(a => a.id));
       const labels = this.attachments.map(a => a.label); let budget = 100000;
       for (const attachment of this.attachments) { if (budget <= 0) break; const snippet = attachment.text.slice(0, Math.min(50000, budget)); budget -= snippet.length; editorContext += `\n\n引用${attachment.kind ? '上下文' : '文件'}：${attachment.kind ? attachment.label : attachment.path}\n${snippet}`; }
       if (this.attachments.some(a => a.truncated || a.text.length > 50000) || budget <= 0) this.importWarning = '引用上下文最多附上约 10 万字符，长内容已截断。';
@@ -409,13 +415,25 @@ class Chat {
       const active = this.chats.find(c => c.id === this.activeId); active.tasks ||= []; this.tasks = active.tasks; active.taskTurn = (active.taskTurn || 0) + 1; this.currentTaskTurn = active.taskTurn;
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
       this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model }); if (!this.save()) throw new Error(this.historyWarning); this.post();
+      const sentChatId = this.activeId, sentThreadId = this.threadId;
+      this.pendingSubmission = { epoch, ids: [...new Set([submittedChatId, sentChatId])], draftText: submittedDraftText, draftVersion: submittedDraftVersion, attachmentIds: submittedAttachmentIds, chatId: sentChatId, threadId: sentThreadId, clientSendId };
       const instruction = mode === 'plan' ? '请先调查项目并给出具体实施计划、涉及文件和验证步骤。本轮只做计划，不修改文件。\n\n' : '';
       const result = await bridge.call('turn/start', { threadId: this.threadId, model: this.model, effort: this.effort, approvalPolicy: preferences.values(vscode.workspace.getConfiguration('gptide')).approvalPolicy, input: [{ type: 'text', text: instruction + importedContext + text + editorContext }], sandboxPolicy: mode !== 'agent' ? { type: 'readOnly' } : { type: 'workspaceWrite', writableRoots: [this.project], networkAccess: preferences.values(vscode.workspace.getConfiguration('gptide')).networkAccess, excludeTmpdirEnvVar: false, excludeSlashTmp: false } });
+      if (!isCurrent()) return;
       if (this.busy) this.turnId = result.turn.id;
-      if (this.cancelPendingSend && this.busy) await bridge.call('turn/interrupt', { threadId: this.threadId, turnId: result.turn.id });
-      for (const id of new Set([submittedChatId, this.activeId])) { const chat = this.chats.find(c => c.id === id); if (chat?.draft === submittedDraftText) this.persistDraft(id, ''); }
-      this.attachments = []; this.view?.webview.postMessage({ type: 'sent', projectKey: this.projectKey }); this.post();
-    } catch (e) { this.busy = false; this.status = e.message; this.post(); throw e; }
+      if (this.cancelPendingSend && this.busy) await bridge.call('turn/interrupt', { threadId: sentThreadId, turnId: result.turn.id });
+      if (!isCurrent()) return;
+      this.acknowledgeSubmission(epoch);
+    } catch (e) { if (!isCurrent() || this.finishedSendEpoch === epoch) return; if (this.busy && this.turnId) { this.status = '任务已启动，等待后续状态'; this.post(); return; } this.pendingSubmission = null; this.busy = false; this.status = e.message; this.post(); throw e; }
+  }
+  acknowledgeSubmission(epoch) {
+    const pending = this.pendingSubmission;
+    if (!pending || pending.epoch !== epoch || this.sendEpoch !== epoch || this.invalidated) return;
+    this.pendingSubmission = null;
+    for (const id of pending.ids) { const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (chat?.draft === pending.draftText && (chat.draftVersion || 0) === pending.draftVersion) this.persistDraft(id, ''); }
+    if (this.activeId === pending.chatId) this.attachments = this.attachments.filter(a => !pending.attachmentIds.has(a.id));
+    else if (this.chatAttachments?.has(pending.chatId)) this.chatAttachments.set(pending.chatId, this.chatAttachments.get(pending.chatId).filter(a => !pending.attachmentIds.has(a.id)));
+    this.view?.webview.postMessage({ type: 'sent', projectKey: this.projectKey, id: pending.chatId, clientSendId: pending.clientSendId }); this.post();
   }
   async approve(request, bridge = this.bridge) {
     if (!bridge || !request || !['string', 'number'].includes(typeof request.id)) return;
@@ -451,6 +469,7 @@ class Chat {
       if (!this.busy || p?.threadId !== this.threadId || typeof turnId !== 'string' || !turnId || this.retiredTurnIds?.has(turnId) || this.turnId && this.turnId !== turnId) return;
       if (!this.turnId) this.turnId = turnId;
     }
+    if (method === 'turn/started' && this.pendingSubmission?.threadId === p.threadId) this.acknowledgeSubmission(this.pendingSubmission.epoch);
     if (p && tasklog.update(this.tasks || (this.tasks = []), method, p, this.currentTaskTurn)) {
       if (method.endsWith('/outputDelta')) { if (!this.postTimer) this.postTimer = setTimeout(() => this.post(), 60); }
       else { if (method === 'item/completed') this.save(); this.post(); }
@@ -473,6 +492,9 @@ class Chat {
     if (method === 'error') { if (!p.willRetry) this.finishTurn({ id: p.turnId, status: 'failed', error: p.error }); else { this.status = p.error?.message || '正在重试'; this.save(); this.post(); } }
   }
   finishTurn(turn) {
+    this.finishedSendEpoch = this.sendEpoch;
+    if (turn.status !== 'failed' && this.pendingSubmission?.threadId === this.threadId) this.acknowledgeSubmission(this.pendingSubmission.epoch);
+    this.pendingSubmission = null;
     this.retireTurn(turn.id); tasklog.finish(this.tasks || [], turn.id, turn.status);
     this.busy = false; this.turnId = null; this.status = turn.status === 'failed' ? turn.error?.message || '请求失败' : turn.status === 'interrupted' ? '已停止' : '完成'; this.activity = '';
     const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey);
@@ -496,7 +518,7 @@ class Chat {
         if (msg.type === 'ready') this.post();
         if (msg.type === 'draft') { const saved = this.persistDraft(msg.id, msg.text); this.view?.webview.postMessage({ type: 'draftSaved', projectKey: this.projectKey, id: msg.id, sequence: msg.sequence, saved, history: history.entries(this.chats.filter(c => c.projectKey === this.projectKey), this.activeId) }); }
         if (msg.type === 'login') await this.login();
-        if (msg.type === 'send') await this.send(msg.text, msg.mode, msg.attach);
+        if (msg.type === 'send') await this.send(msg.text, msg.mode, msg.attach, typeof msg.clientSendId === 'string' && msg.clientSendId.length <= 160 ? msg.clientSendId : undefined);
         if (msg.type === 'stop' && this.busy) { this.cancelPendingSend = true; this.status = '正在停止'; this.post(); if (this.turnId && this.bridge) await this.bridge.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }); else if (!this.bridge) this.pendingBridge?.dispose(); }
         if (msg.type === 'select') { if (!this.busy && this.select(msg.id)) this.save(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'new') { if (!this.busy) this.newChat(); else this.post(); }
@@ -529,7 +551,7 @@ class Chat {
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
         if (msg.type === 'terminal') await vscode.commands.executeCommand('workbench.action.terminal.toggleTerminal');
-      } catch (e) { this.status = e.message; this.post(); }
+      } catch (e) { this.status = e.message; this.post(); if (msg.type === "send") this.view?.webview.postMessage({ type: "sendRejected", projectKey: this.projectKey, clientSendId: msg.clientSendId }); }
     });
     this.post();
   }
