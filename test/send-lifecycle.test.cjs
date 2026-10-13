@@ -42,6 +42,42 @@ test('stale account refresh errors cannot overwrite a new connection', async () 
   fail(new Error('old failure')); await old;
   await assert.rejects(chat.refreshAccount(), /current failure/);
 });
+test('inline prompt rechecks project, trust, review lock and document before any generation', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-inline-guard-')), file = path.join(root, 'a.js'); fs.writeFileSync(file, 'let a = 1;');
+  const saved = { editor: vscode.window.activeTextEditor, input: vscode.window.showInputBox, progress: vscode.window.withProgress, Range: vscode.Range, EndOfLine: vscode.EndOfLine };
+  try {
+    vscode.Range = class { constructor(start, end) { this.start = start; this.end = end; } }; vscode.EndOfLine = { CRLF: 2 };
+    vscode.window.withProgress = () => { throw new Error('Must not start generation'); };
+    for (const kind of ['project', 'trust', 'review', 'edited', 'closed']) {
+      const chat = fixture(); chat.project = root; let finish, text = 'let a = 1;';
+      const document = { uri: { scheme: 'file', fsPath: file }, version: 1, languageId: 'javascript', getText: () => text, offsetAt: position => position.offset };
+      vscode.workspace.isTrusted = true; vscode.window.activeTextEditor = { document, selection: { start: { offset: 0 }, end: { offset: 10 }, isEmpty: false } };
+      vscode.window.showInputBox = () => new Promise(resolve => { finish = resolve; });
+      const pending = chat.inlineEdit(); await Promise.resolve();
+      if (kind === 'project') chat.invalidated = true;
+      if (kind === 'trust') vscode.workspace.isTrusted = false;
+      if (kind === 'review') chat.reviewBusy = true;
+      if (kind === 'edited') { text = 'new text'; document.version++; }
+      if (kind === 'closed') document.isClosed = true;
+      finish('QA instruction'); await assert.rejects(pending, /项目已切换|信任|已有任务|发生变化/); assert.ok(!chat.inlineBusy);
+    }
+  } finally { vscode.workspace.isTrusted = true; vscode.Range = saved.Range; vscode.EndOfLine = saved.EndOfLine; vscode.window.activeTextEditor = saved.editor; vscode.window.showInputBox = saved.input; vscode.window.withProgress = saved.progress; fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('closing a project cancels its active inline generation and releases the lock', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-inline-cancel-')), file = path.join(root, 'a.js'); fs.writeFileSync(file, 'let a = 1;');
+  const agent = require('../builtin/inline-agent.cjs'), originalGenerate = agent.generate;
+  const saved = { editor: vscode.window.activeTextEditor, input: vscode.window.showInputBox, progress: vscode.window.withProgress, Range: vscode.Range, EndOfLine: vscode.EndOfLine, ProgressLocation: vscode.ProgressLocation };
+  const progressToken = new vscode.CancellationTokenSource(); let received;
+  try {
+    const chat = fixture(); chat.project = root;
+    vscode.Range = class { constructor(start, end) { this.start = start; this.end = end; } }; vscode.EndOfLine = { CRLF: 2 }; vscode.ProgressLocation = { Notification: 15 };
+    vscode.window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: file }, version: 1, languageId: 'javascript', getText: () => 'let a = 1;', offsetAt: position => position.offset }, selection: { start: { offset: 0 }, end: { offset: 10 }, isEmpty: false } };
+    vscode.window.showInputBox = async () => 'QA instruction'; vscode.window.withProgress = (options, action) => action({}, progressToken.token);
+    agent.generate = ({ token }) => { received = token; return new Promise((resolve, reject) => token.onCancellationRequested(() => reject(new Error('已取消代码改写。')))); };
+    const pending = chat.inlineEdit(); await Promise.resolve(); await Promise.resolve(); assert.equal(chat.inlineBusy, true);
+    chat.invalidateProject(); await assert.rejects(pending, /已取消/); assert.equal(received.isCancellationRequested, true); assert.equal(chat.inlineBusy, false); assert.equal(chat.inlineCancellation, null); assert.equal(fs.readFileSync(file, 'utf8'), 'let a = 1;');
+  } finally { agent.generate = originalGenerate; progressToken.dispose(); vscode.Range = saved.Range; vscode.EndOfLine = saved.EndOfLine; vscode.ProgressLocation = saved.ProgressLocation; vscode.window.activeTextEditor = saved.editor; vscode.window.showInputBox = saved.input; vscode.window.withProgress = saved.progress; fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('preparing a send locks its conversation and ignores duplicate send', async () => {
   const chat = fixture(); let finishConnect, calls = 0;
   chat.connect = () => new Promise(resolve => { finishConnect = resolve; });

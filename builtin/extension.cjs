@@ -280,6 +280,7 @@ class Chat {
   }
   async inlineEdit() {
     await this.ready;
+    if (this.invalidated) throw new Error('项目已切换，已放弃改写。');
     if (this.busy || this.reviewBusy || this.inlineBusy) throw new Error('请等待当前任务完成后再改写选区。');
     const editor = vscode.window.activeTextEditor, document = editor?.document;
     if (!this.project || !document || document.uri.scheme !== 'file' || !review.within(this.project, document.uri.fsPath)) throw new Error('请先打开本项目中的代码文件。');
@@ -288,13 +289,23 @@ class Chat {
     const snapshot = { file: document.uri.fsPath, language: document.languageId, version: document.version, text: document.getText(), start: document.offsetAt(range.start), end: document.offsetAt(range.end), eol: document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n' };
     const instruction = await vscode.window.showInputBox({ title: 'GptIDE · Ctrl+K 改写代码', prompt: editor.selection.isEmpty ? '描述要在光标处生成的代码' : '描述要如何修改选中的代码', placeHolder: '例如：转换为 async 函数，保持现有行为', ignoreFocusOut: true, validateInput: value => !value.trim() ? '请输入修改要求' : value.length > 4000 ? '修改要求过长' : null });
     if (!instruction) return;
-    if (this.busy || this.inlineBusy) throw new Error('已有任务开始，请等待完成。');
+    if (this.invalidated) throw new Error('项目已切换，已放弃改写。');
+    if (this.busy || this.reviewBusy || this.inlineBusy) throw new Error('已有任务开始，请等待完成。');
+    if (!vscode.workspace.isTrusted) throw new Error('请先信任此项目，再使用 Ctrl+K 改写。');
+    if (document.isClosed || !inlineCore.unchanged(snapshot, { text: document.getText(), version: document.version })) throw new Error('代码在输入要求期间发生变化，请重新选择后改写。');
     this.inlineBusy = true;
+    const cancellation = new vscode.CancellationTokenSource(); this.inlineCancellation = cancellation;
     try {
-      const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GptIDE 正在改写选区', cancellable: true }, (_, token) => inlineAgent.generate({ executable: findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')), cwd: this.project, model: this.model, effort: this.effort, snapshot, instruction, token }));
+      const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GptIDE 正在改写选区', cancellable: true }, async (_, token) => {
+        const relay = token.onCancellationRequested(() => cancellation.cancel());
+        if (token.isCancellationRequested || this.invalidated) cancellation.cancel();
+        try { return await inlineAgent.generate({ executable: findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')), cwd: this.project, model: this.model, effort: this.effort, snapshot, instruction, token: cancellation.token }); }
+        finally { relay.dispose(); }
+      });
       if (this.invalidated) throw new Error('项目已切换，已放弃改写。');
+      if (cancellation.token.isCancellationRequested) throw new Error('已取消代码改写。');
       const current = () => ({ text: document.getText(), version: document.version });
-      if (!inlineCore.unchanged(snapshot, current())) throw new Error('代码在生成期间发生变化，已放弃应用，避免覆盖你的修改。');
+      if (document.isClosed || !inlineCore.unchanged(snapshot, current())) throw new Error('代码在生成期间发生变化或文件已关闭，已放弃应用。');
       const proposed = inlineCore.proposal(snapshot, replacement);
       if (proposed.text === snapshot.text) { vscode.window.showInformationMessage('模型未提出代码变化。'); return; }
       const id = crypto.randomUUID(); this.contextBefore ||= new Map(); this.contextBefore.set(id + '-before', snapshot.text); this.contextBefore.set(id + '-after', proposed.text);
@@ -305,11 +316,12 @@ class Chat {
       const answer = await vscode.window.showInformationMessage('检查差异后选择是否应用到原文件。', '应用修改', '放弃');
       if (answer !== '应用修改') return;
       if (this.invalidated) throw new Error('项目已切换，已拒绝应用。');
-      if (!inlineCore.unchanged(snapshot, current())) throw new Error('原文件已有后续修改，无法安全应用。请重新生成。');
+      if (!vscode.workspace.isTrusted) throw new Error('项目未受信任，已拒绝应用。');
+      if (document.isClosed || !inlineCore.unchanged(snapshot, current())) throw new Error('原文件已有后续修改或已关闭，无法安全应用。请重新生成。');
       const edit = new vscode.WorkspaceEdit(); edit.replace(document.uri, range, proposed.replacement);
       if (!await vscode.workspace.applyEdit(edit)) throw new Error('应用修改失败。');
       await vscode.window.showTextDocument(document); vscode.window.showInformationMessage('已应用选区修改。Ctrl+Z 可撤销；保存文件由你决定。');
-    } finally { this.inlineBusy = false; }
+    } finally { if (this.inlineCancellation === cancellation) this.inlineCancellation = null; cancellation.dispose(); this.inlineBusy = false; }
   }
   async deleteChat() {
     const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || this.busy || this.reviewBusy || this.storageBlocked || this.invalidated) return;
@@ -576,6 +588,7 @@ class Chat {
     this.post();
   }
   invalidateProject() {
+    this.inlineCancellation?.cancel();
     for (const record of this.pendingRequests?.values() || []) { record.resolved = true; record.token.cancel(); }
     this.save(); this.invalidated = true; clearTimeout(this.postTimer); this.bridge?.dispose(); this.pendingBridge?.dispose();
     this.view?.webview.postMessage({ type: 'reset', projectKey: this.projectKey });
