@@ -17,7 +17,40 @@ test('VS Code JSONC and merge preserve conflicting settings and protected defaul
   assert.deepEqual(core.mergeKeybindings(keys, imported, true).map(k => k.command), ['gptide.inlineEdit', 'new', 'added']);
   assert.deepEqual(core.mergeKeybindings(keys, imported, false).map(k => k.command), ['gptide.inlineEdit', 'old', 'added']);
 });
-test('local extension inventory and VSIX preserve installed files without touching source', () => {
+
+test('empty/comment-only configs and malformed key entries do not break valid imports', () => {
+  assert.deepEqual(core.configuration('// empty settings\n', 'settings'), {}); assert.deepEqual(core.configuration('/* empty keys */', 'keys'), []);
+  assert.throws(() => core.configuration('{} /* unfinished', 'settings'), /未结束/);
+  assert.throws(() => core.configuration('[]', 'settings'), /对象/);
+  const malformed = [null, {}, { key: 1, command: 'bad' }, { key: 'ctrl+j' }, { key: 'ctrl+k', command: '-gptide.inlineEdit' }];
+  const merged = core.mergeKeybindings(malformed, [{ key: 'ctrl+k', command: 'bad' }, { key: 'ctrl+j', command: 'new' }], true);
+  assert.ok(merged.some(b => b?.command === '-gptide.inlineEdit')); assert.ok(merged.some(b => b?.command === 'new')); assert.ok(!merged.some(b => b?.command === 'bad' && b?.key === 'ctrl+k'));
+});
+
+test('malformed and traversal extension index records cannot import outside selected directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-index-'));
+  try {
+    const user = path.join(root, 'User'), extensions = path.join(root, 'extensions'), outside = path.join(root, 'outside');
+    for (const dir of [user, extensions, outside]) fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(outside, 'package.json'), JSON.stringify({ name: 'outside', publisher: 'test', version: '1.0.0' }));
+    fs.writeFileSync(path.join(extensions, 'extensions.json'), JSON.stringify([null, 1, {}, { relativeLocation: '../outside' }, { location: { fsPath: outside } }]));
+    const result = core.scan(user, extensions); assert.deepEqual(result.plugins, []); assert.equal(result.warnings.length, 2);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('plugin limits are enforced before reads and aborted streams remove only their partial output', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-stream-'));
+  try {
+    const plugin = { directory: root, manifest: { publisher: 'test', name: 'fixture', version: '1.0.0' } }, output = path.join(root, '..', path.basename(root) + '.vsix');
+    const file = path.join(root, 'large.bin'), descriptor = fs.openSync(file, 'w'); try { for (let i = 0; i < 128; i++) fs.writeSync(descriptor, Buffer.alloc(65536, i)); } finally { fs.closeSync(descriptor); }
+    await assert.rejects(core.packagePlugin(plugin, output, { maximumBytes: 1024 }), /过大/); assert.equal(fs.existsSync(output), false);
+    const controller = new AbortController(); const packaging = core.packagePlugin(plugin, output, { signal: controller.signal });
+    while (!fs.existsSync(output)) await new Promise(resolve => setImmediate(resolve)); controller.abort();
+    await assert.rejects(packaging, /abort/i); assert.equal(fs.existsSync(output), false); assert.equal(fs.statSync(file).size, 8 * 1024 * 1024);
+    fs.writeFileSync(output, 'existing'); await assert.rejects(core.packagePlugin(plugin, output), /EEXIST/); assert.equal(fs.readFileSync(output, 'utf8'), 'existing'); fs.unlinkSync(output);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('local extension inventory and VSIX preserve installed files without touching source', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-vscode-'));
   try {
     const user = path.join(root, 'User'), extensions = path.join(root, 'extensions'), plugin = path.join(extensions, 'fixture');
@@ -27,7 +60,7 @@ test('local extension inventory and VSIX preserve installed files without touchi
     fs.writeFileSync(path.join(plugin, '中文.txt'), 'fixture');
     fs.writeFileSync(path.join(extensions, 'extensions.json'), JSON.stringify([{ relativeLocation: 'fixture' }]));
     const plan = core.scan(user, extensions); assert.equal(plan.plugins.length, 1); assert.equal(plan.settings['editor.fontSize'], 17);
-    const zip = path.join(root, 'fixture.vsix'); core.packagePlugin(plan.plugins[0], zip);
+    const zip = path.join(root, 'fixture.vsix'); await core.packagePlugin(plan.plugins[0], zip);
     const buffer = fs.readFileSync(zip), files = {}; let offset = 0;
     while (buffer.readUInt32LE(offset) === 0x04034b50) {
       const size = buffer.readUInt32LE(offset + 18), length = buffer.readUInt16LE(offset + 26), extra = buffer.readUInt16LE(offset + 28);
