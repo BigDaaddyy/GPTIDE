@@ -42,6 +42,31 @@ test('stale account refresh errors cannot overwrite a new connection', async () 
   fail(new Error('old failure')); await old;
   await assert.rejects(chat.refreshAccount(), /current failure/);
 });
+test('file discovery cannot open a picker after a project closes or expose foreign files', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-attach-')), file = path.join(root, 'a.js'); fs.writeFileSync(file, 'QA file');
+  const saved = { find: vscode.workspace.findFiles, relative: vscode.workspace.asRelativePath, pick: vscode.window.showQuickPick };
+  try {
+    const closed = fixture(); closed.project = root; let finish;
+    vscode.workspace.findFiles = () => new Promise(resolve => { finish = resolve; });
+    vscode.window.showQuickPick = () => { throw new Error('Closed project must not show a picker'); };
+    const pending = closed.attachFiles(); await Promise.resolve(); closed.invalidated = true; finish([{ scheme: 'file', fsPath: file }]); await pending; assert.deepEqual(closed.attachments, []);
+    const chat = fixture(); chat.project = root; vscode.workspace.asRelativePath = uri => path.basename(uri.fsPath);
+    vscode.workspace.findFiles = async () => [{ scheme: 'file', fsPath: file }, { scheme: 'untitled', fsPath: file }, { scheme: 'file', fsPath: path.join(os.tmpdir(), 'foreign.js') }];
+    vscode.window.showQuickPick = async rows => { assert.equal(rows.length, 1); assert.equal(rows[0].uri.fsPath, file); return rows; };
+    await chat.attachFiles(); assert.equal(chat.attachments.length, 1); assert.equal(chat.attachments[0].text, 'QA file');
+  } finally { vscode.workspace.findFiles = saved.find; vscode.workspace.asRelativePath = saved.relative; vscode.window.showQuickPick = saved.pick; fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('context pickers discard project changes before Git or folder content reads', async () => {
+  const chat = fixture(), core = require('../builtin/context.cjs'), saved = { pick: vscode.window.showQuickPick, git: core.gitDiff, find: vscode.workspace.findFiles, folder: core.folderText, RelativePattern: vscode.RelativePattern };
+  try {
+    let finish;
+    vscode.window.showQuickPick = () => new Promise(resolve => { finish = resolve; }); core.gitDiff = () => { throw new Error('Stale Git selection must not read'); };
+    const git = chat.attachContext('git'); await Promise.resolve(); chat.activeId = 'other'; finish('未暂存差异'); await git; assert.deepEqual(chat.attachments, []);
+    chat.activeId = 'one'; vscode.RelativePattern = class {};
+    vscode.workspace.findFiles = () => new Promise(resolve => { finish = resolve; }); core.folderText = () => { throw new Error('Closed project must not read folder contents'); };
+    const folder = chat.attachContext('folder', { scheme: 'file', fsPath: chat.project }); await Promise.resolve(); chat.invalidated = true; finish([]); await folder; assert.deepEqual(chat.attachments, []);
+  } finally { vscode.window.showQuickPick = saved.pick; core.gitDiff = saved.git; vscode.workspace.findFiles = saved.find; core.folderText = saved.folder; vscode.RelativePattern = saved.RelativePattern; }
+});
 test('inline prompt rechecks project, trust, review lock and document before any generation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-inline-guard-')), file = path.join(root, 'a.js'); fs.writeFileSync(file, 'let a = 1;');
   const saved = { editor: vscode.window.activeTextEditor, input: vscode.window.showInputBox, progress: vscode.window.withProgress, Range: vscode.Range, EndOfLine: vscode.EndOfLine };

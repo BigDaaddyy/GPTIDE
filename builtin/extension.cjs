@@ -175,11 +175,12 @@ class Chat {
   schedulePost() { if (!this.postTimer && !this.invalidated) this.postTimer = setTimeout(() => { this.postTimer = null; this.post(); }, 60); }
   async attachFiles(current = false) {
     await this.ready;
-    if (!this.project || this.busy) return;
-    const targetId = this.activeId;
+    if (!this.project || this.busy || this.invalidated) return;
+    const targetId = this.activeId, project = this.project;
+    const isCurrent = () => !this.invalidated && this.activeId === targetId && this.project === project;
     if (current) {
       const editor = vscode.window.activeTextEditor;
-      if (!editor || !review.within(this.project, editor.document.uri.fsPath)) throw new Error('请先打开本项目中的一个文件');
+      if (!editor || editor.document.isClosed || editor.document.uri.scheme !== 'file' || !review.within(this.project, editor.document.uri.fsPath)) throw new Error('请先打开本项目中的一个文件');
       const selected = !editor.selection.isEmpty;
       const attachment = { id: crypto.randomUUID(), path: editor.document.uri.fsPath, label: path.basename(editor.document.fileName) + (selected ? `:${editor.selection.start.line + 1}-${editor.selection.end.line + 1}` : ''), text: selected ? editor.document.getText(editor.selection) : editor.document.getText() };
       attachment.truncated = attachment.text.length > 100000; attachment.text = attachment.text.slice(0, 100000);
@@ -188,11 +189,12 @@ class Chat {
       this.attachments.push(attachment);
     } else {
       const files = await vscode.workspace.findFiles('**/*', '**/{.git,node_modules,dist,build,.next,.venv}/**', 2000);
-      const picked = await vscode.window.showQuickPick(files.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { canPickMany: true, placeHolder: '搜索项目文件，作为上下文附到当前消息' });
-      if (this.invalidated || this.activeId !== targetId) return;
+      if (!isCurrent()) return;
+      const picked = await vscode.window.showQuickPick(files.filter(uri => uri.scheme === 'file' && review.within(project, uri.fsPath)).map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { canPickMany: true, placeHolder: '搜索项目文件，作为上下文附到当前消息' });
+      if (!isCurrent()) return;
       for (const item of (picked || []).slice(0, 20)) {
         if (this.attachments.length >= 20) { vscode.window.showInformationMessage('最多引用 20 项上下文'); break; }
-        if (!review.within(this.project, item.uri.fsPath)) continue;
+        if (item.uri.scheme !== 'file' || !review.within(project, item.uri.fsPath)) continue;
         const text = review.readText(item.uri.fsPath);
         if (text === undefined || text === null) { vscode.window.showInformationMessage(`${item.label} 不是可读取的小型文本文件`); continue; }
         if (!this.attachments.some(a => a.path === item.uri.fsPath)) this.attachments.push({ id: crypto.randomUUID(), path: item.uri.fsPath, label: item.label, text: text.slice(0, 100000), truncated: text.length > 100000 });
@@ -203,24 +205,27 @@ class Chat {
   async attachContext(kind, folderUri) {
     await this.ready;
     if (this.busy || this.invalidated || !this.project) return;
-    const core = require('./context.cjs'), targetId = this.activeId; let text, label;
+    const core = require('./context.cjs'), targetId = this.activeId, project = this.project; let text, label;
+    const isCurrent = () => !this.invalidated && this.activeId === targetId && this.project === project;
     if (kind === 'diagnostics') {
       text = core.diagnostics(this.project, vscode.languages.getDiagnostics()); label = '项目诊断';
       if (!text) return vscode.window.showInformationMessage('当前项目没有错误或警告');
     } else if (kind === 'git') {
-      const selected = await vscode.window.showQuickPick(['未暂存差异', '暂存区差异'], { title: '引用 Git 差异' }); if (!selected) return;
+      const selected = await vscode.window.showQuickPick(['未暂存差异', '暂存区差异'], { title: '引用 Git 差异' }); if (!selected || !isCurrent()) return;
       text = await core.gitDiff(this.project, selected === '暂存区差异'); label = selected;
+      if (!isCurrent()) return;
       if (!text.trim()) return vscode.window.showInformationMessage('所选范围没有 Git 差异');
     } else if (kind === 'folder') {
       if (!folderUri) { const selected = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(this.project), canSelectFiles: false, canSelectFolders: true, canSelectMany: false }); folderUri = selected?.[0]; }
-      if (!folderUri) return;
+      if (!folderUri || !isCurrent()) return;
       if (folderUri.scheme !== 'file' || !review.within(this.project, folderUri.fsPath)) throw new Error('文件夹不属于当前项目');
       const files = await vscode.workspace.findFiles(new vscode.RelativePattern(folderUri, '**/*'), '**/{.git,node_modules,dist,build,.next,.venv,__pycache__}/**', 200);
-      const result = core.folderText(this.project, folderUri.fsPath, files.map(uri => uri.fsPath));
+      if (!isCurrent()) return;
+      const result = core.folderText(this.project, folderUri.fsPath, files.filter(uri => uri.scheme === 'file').map(uri => uri.fsPath));
       if (!result.count) return vscode.window.showInformationMessage('文件夹没有可引用的文本文件');
       text = result.text; label = `${path.relative(this.project, folderUri.fsPath) || path.basename(this.project)}/ · ${result.count} 文件${result.limited ? '（部分）' : ''}`;
     } else return;
-    if (this.invalidated || targetId !== this.activeId) return;
+    if (!isCurrent()) return;
     this.attachments = this.attachments.filter(a => a.kind !== kind || a.label !== label);
     if (this.attachments.length >= 20) throw new Error('最多引用 20 项上下文');
     this.attachments.push(core.attachment(kind, label, text, this.project)); this.post();
