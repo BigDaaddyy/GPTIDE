@@ -9,7 +9,8 @@ let pendingTabChange = false;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
-let tabsSignature;
+let tabsSignature, messageAnchor = null, findPosition = 0, findHits = [], findQuery = '', findTimer, findChat, taskFilterSignature;
+const findCache = new Map();
 const post = (type, data = {}) => { if (!invalidated) api.postMessage({ type, projectKey, ...data }); };
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 function inline(node, text) {
@@ -49,7 +50,7 @@ function renderHistory() {
 }
 function renderMessages(s) {
   const chatKey = s.activeId || '__new__', switched = renderedChat !== chatKey;
-  if (switched) { renderedChat = chatKey; visibleMessages = 100; }
+  if (switched) { renderedChat = chatKey; visibleMessages = 100; messageAnchor = null; }
   const box = el('messages'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100, oldTop = box.scrollTop;
   const nextLayout = JSON.stringify([chatKey, s.source, !s.messages.length]);
   if (nextLayout !== layoutKey) { box.replaceChildren(); messageRows.clear(); layoutKey = nextLayout; }
@@ -57,19 +58,25 @@ function renderMessages(s) {
     el('scroll-bottom').hidden = true; return;
   }
   if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor · 导入记录'));
-  const start = Math.max(0, s.messages.length - visibleMessages);
+  const start = messageAnchor === null ? Math.max(0, s.messages.length - visibleMessages) : Math.max(0, messageAnchor - 40);
+  const end = messageAnchor === null ? s.messages.length : Math.min(s.messages.length, start + 100);
   let more = box.querySelector('.load-older');
   if (start && !more) { more = make('button', 'load-older text-button'); box.prepend(more); }
-  if (more) { more.hidden = !start; more.textContent = `加载更早的消息（还有 ${start} 条）`; more.onclick = () => { const height = box.scrollHeight, top = box.scrollTop; visibleMessages += 100; renderMessages(state); box.scrollTop = top + box.scrollHeight - height; }; }
+  if (more) { more.hidden = !start; more.textContent = `加载更早的消息（还有 ${start} 条）`; more.onclick = () => { const height = box.scrollHeight, top = box.scrollTop; if (messageAnchor === null) visibleMessages += 100; else messageAnchor = Math.max(0, start - 100) + 40; renderMessages(state); box.scrollTop = Math.max(0, top + box.scrollHeight - height); updateFind(false); }; }
+  let newer = box.querySelector('.return-latest');
+  if (end < s.messages.length && !newer) newer = make('button', 'return-latest text-button', '返回最新消息');
+  if (newer) { newer.hidden = end === s.messages.length; newer.onclick = () => { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); box.scrollTop = box.scrollHeight; }; }
   const visible = new Set();
-  for (let index = start; index < s.messages.length; index++) {
+  for (let index = start; index < end; index++) {
     const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
     const signature = JSON.stringify(message); let row = messageRows.get(key);
+    if (row) row.item.dataset.messageIndex = String(index);
     if (row && row.signature === signature) continue;
     if (row) {
       row.body.replaceChildren(); content(row.body, message.text); row.signature = signature; row.message = message; continue;
     }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GptIDE');
+    item.dataset.messageIndex = String(index);
     if (message.mode) role.append(make('span', 'badge', message.mode));
     const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
@@ -78,15 +85,50 @@ function renderMessages(s) {
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.
-  const ordered = [...visible].map(key => messageRows.get(key).item);
+  const ordered = [...visible].map(key => messageRows.get(key).item); if (newer) ordered.push(newer);
   for (let i = ordered.length - 1, next = null; i >= 0; i--) { const item = ordered[i]; if (item.parentNode !== box || item.nextSibling !== next) box.insertBefore(item, next); next = item; }
-  if (atBottom || switched) box.scrollTop = box.scrollHeight; else box.scrollTop = oldTop;
+  if ((atBottom && messageAnchor === null) || switched) box.scrollTop = box.scrollHeight; else box.scrollTop = oldTop;
   el('scroll-bottom').hidden = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
 }
+function highlightFind() {
+  document.querySelectorAll('.find-current').forEach(e => e.classList.remove('find-current')); globalThis.CSS?.highlights?.delete('gptide-find');
+  const index = findHits[findPosition], row = [...el('messages').querySelectorAll('.message')].find(e => Number(e.dataset.messageIndex) === index);
+  if (!row || !findQuery || el('find-bar').hidden) return;
+  row.classList.add('find-current');
+  if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
+  const ranges = [], walker = document.createTreeWalker(row.querySelector('.content'), NodeFilter.SHOW_TEXT), pattern = new RegExp(escapeFindQuery(findQuery), 'giu'); let node;
+  while (ranges.length < 500 && (node = walker.nextNode())) for (const match of node.textContent.matchAll(pattern)) { const range = document.createRange(); range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length); ranges.push(range); if (ranges.length >= 500) break; }
+  CSS.highlights.set('gptide-find', new Highlight(...ranges));
+}
+function jumpFind() {
+  const index = findHits[findPosition]; if (index === undefined) { highlightFind(); return; }
+  const existing = [...el('messages').querySelectorAll('.message')].find(e => Number(e.dataset.messageIndex) === index);
+  if (!existing) { messageAnchor = index; renderMessages(state); }
+  highlightFind(); const row = [...el('messages').querySelectorAll('.message')].find(e => Number(e.dataset.messageIndex) === index); row?.scrollIntoView({ block: 'center' });
+}
+function updateFind(jump = false) {
+  if (el('find-bar').hidden) return;
+  const query = el('find-query').value, changed = query !== findQuery || findChat !== state.activeId, previousIndex = findHits[findPosition];
+  if (changed) { findCache.clear(); findPosition = 0; findChat = state.activeId; }
+  findQuery = query; findHits = findMessageMatches(state.messages || [], query, findCache);
+  if (!changed && findHits.includes(previousIndex)) findPosition = findHits.indexOf(previousIndex);
+  findPosition = Math.min(findPosition, Math.max(0, findHits.length - 1));
+  el('find-count').textContent = `${findHits.length ? findPosition + 1 : 0}/${findHits.length}`; el('find-count').title = `${findHits.length} 条匹配消息`;
+  el('find-prev').disabled = el('find-next').disabled = !findHits.length;
+  if (jump || (changed && query)) jumpFind(); else highlightFind();
+}
+function showFind() { if (state.loadingScope) return; el('find-bar').hidden = false; el('find-query').focus(); el('find-query').select(); updateFind(false); }
+function closeFind() { clearTimeout(findTimer); el('find-bar').hidden = true; document.querySelectorAll('.find-current').forEach(e => e.classList.remove('find-current')); globalThis.CSS?.highlights?.delete('gptide-find'); el('input').focus(); }
+function moveFind(delta) { if (!findHits.length) return; findPosition = (findPosition + delta + findHits.length) % findHits.length; updateFind(false); jumpFind(); }
 function renderTasks(s) {
   const tasks = s.tasks || [], key = s.activeId || '__new__';
-  el('task-panel').hidden = !tasks.length; el('task-count').textContent = `${tasks.length} 个步骤`;
-  if (key !== taskChat) { taskChat = key; taskRows.clear(); el('task-list').replaceChildren(); }
+  el('task-panel').hidden = !tasks.length;
+  if (key !== taskChat) { taskChat = key; taskRows.clear(); el('task-list').replaceChildren(); el('task-filter').value = 'all'; el('task-failures').setAttribute('aria-pressed', 'false'); taskFilterSignature = undefined; }
+  const turns = [...new Set(tasks.map(t => t.turn || 1))].sort((a, b) => b - a), signature = JSON.stringify(turns);
+  if (signature !== taskFilterSignature) { const selected = el('task-filter').value; el('task-filter').replaceChildren(new Option('所有轮次', 'all'), ...turns.map(t => new Option(`第 ${t} 轮`, String(t)))); el('task-filter').value = turns.some(t => String(t) === selected) ? selected : 'all'; taskFilterSignature = signature; }
+  const visibleTask = t => (el('task-filter').value === 'all' || String(t.turn || 1) === el('task-filter').value) && (el('task-failures').getAttribute('aria-pressed') !== 'true' || t.status === 'failed');
+  const count = tasks.filter(visibleTask).length; el('task-count').textContent = count === tasks.length ? `${count} 个步骤` : `${count}/${tasks.length} 个步骤`;
+  el('task-empty').hidden = !!count; el('task-copy').disabled = !count;
   const keys = new Set();
   const kinds = { read: '读取', search: '查找', command: '命令', file: '文件', tool: '工具' };
   const statuses = { running: s.busy ? '运行中' : '未确认结果', completed: '完成', failed: '失败', interrupted: '已停止', ended: '已结束' };
@@ -99,6 +141,7 @@ function renderTasks(s) {
       row = { node, label, status, meta, files, output, copy }; taskRows.set(id, row);
     }
     row.task = task; row.label.textContent = `#${task.turn || 1} · ${kinds[task.kind] || '步骤'} · ${task.title}`; row.label.title = task.title;
+    row.node.hidden = !visibleTask(task);
     row.status.textContent = statuses[task.status] || task.status; row.status.className = 'task-state ' + task.status;
     row.meta.textContent = [typeof task.exitCode === 'number' ? `退出码 ${task.exitCode}` : '', typeof task.durationMs === 'number' ? `${(task.durationMs / 1000).toFixed(1)} 秒` : '', task.truncated ? '输出仅保留最后 12000 字符' : ''].filter(Boolean).join(' · ');
     if (row.output.textContent !== (task.output || '')) row.output.textContent = task.output || ''; row.output.hidden = !task.output; row.copy.disabled = !task.output;
@@ -134,6 +177,7 @@ function render(s) {
   }
   if (pendingFocusChat) { const target = [...el('chat-tabs').querySelectorAll('[role="tab"]')].find(b => b.dataset.chatId === pendingFocusChat); target?.focus(); pendingFocusChat = undefined; }
   renderMessages(s); renderTasks(s); state = s;
+  updateFind(false);
   el('input').disabled = pendingTabChange || !!s.loadingScope;
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
@@ -174,12 +218,19 @@ el('input').onkeydown = e => { const sendKey = state.preferences?.submitKey === 
 el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { flushDraft(); submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
+el('find').onclick = () => { el('menu').hidden = true; showFind(); };
+el('find-query').oninput = () => { clearTimeout(findTimer); findTimer = setTimeout(() => updateFind(true), 120); };
+el('find-query').onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); moveFind(e.shiftKey ? -1 : 1); } };
+el('find-prev').onclick = () => moveFind(-1); el('find-next').onclick = () => moveFind(1); el('find-close').onclick = closeFind;
+el('task-filter').onchange = () => renderTasks(state);
+el('task-failures').onclick = () => { el('task-failures').setAttribute('aria-pressed', String(el('task-failures').getAttribute('aria-pressed') !== 'true')); renderTasks(state); };
+el('task-copy').onclick = () => post('copyTasks', { ids: [...taskRows.entries()].filter(([, row]) => !row.node.hidden).map(([id]) => id) });
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
-for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
+for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
-el('scroll-bottom').onclick = () => el('messages').scrollTop = el('messages').scrollHeight;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; } });
+el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; if (!el('find-bar').hidden) closeFind(); } });
 document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; });
 el('chat-tabs').addEventListener('keydown', e => {
   if (state.busy || e.target.getAttribute('role') !== 'tab') return;
@@ -191,4 +242,5 @@ el('chat-tabs').addEventListener('keydown', e => {
   if (next && next !== state.activeId) { e.preventDefault(); flushDraft(); beginTabChange(); pendingFocusChat = next; post('select', { id: next }); }
 });
 window.addEventListener('pagehide', flushDraft);
+const scrollObserver = new ResizeObserver(() => { const rect = el('messages').getBoundingClientRect(); el('scroll-bottom').style.bottom = Math.max(8, innerHeight - rect.bottom + 8) + 'px'; }); scrollObserver.observe(el('messages'));
 resizeInput(); post('ready');

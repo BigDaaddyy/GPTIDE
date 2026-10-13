@@ -1,4 +1,5 @@
 const test = require('node:test'), assert = require('node:assert/strict'), Module = require('node:module');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const config = { get: (key, fallback) => fallback };
 const vscode = { workspace: { isTrusted: true, getConfiguration: () => config }, window: {} };
 const originalRequire = Module.prototype.require;
@@ -41,4 +42,22 @@ test('loading never exposes unverified chat ids or drafts and unknown selection 
   chat.post(); assert.equal(payload.activeId, null); assert.equal(payload.draft, ''); assert.deepEqual(payload.chats, []); assert.deepEqual(payload.messages, []);
   chat.loadingScope = false; chat.chats[0].projectKey = 'project'; chat.chatAttachments = new Map();
   assert.equal(chat.select('foreign-id'), false); assert.equal(chat.activeId, 'one');
+});
+test('export command writes the complete selected project conversation and rejects foreign records', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-export-'));
+  try {
+    const file = path.join(root, 'export.md'), chat = fixture();
+    chat.chats[0].messages = Array.from({ length: 300 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: 'QA message ' + i }));
+    chat.chats[0].tasks = [{ turn: 1, status: 'failed', title: 'QA command', output: 'QA task output' }];
+    vscode.Uri = { file: file => ({ fsPath: file }) };
+    vscode.window.showQuickPick = async () => [{ kind: 'tasks' }, { kind: 'draft' }];
+    vscode.window.showSaveDialog = async () => ({ fsPath: file });
+    vscode.workspace.fs = { writeFile: async (uri, buffer) => fs.writeFileSync(uri.fsPath, buffer) };
+    vscode.workspace.openTextDocument = async uri => uri;
+    vscode.window.showTextDocument = async () => {};
+    await chat.exportChat(); const output = fs.readFileSync(file, 'utf8');
+    assert.ok(output.includes('QA message 0')); assert.ok(output.includes('QA message 299')); assert.ok(output.includes('QA task output')); assert.ok(output.includes('未发送草稿'));
+    chat.chats[0].projectKey = 'another-project'; vscode.window.showSaveDialog = async () => { throw new Error('Foreign export must never show a save dialog'); };
+    await chat.exportChat(); assert.equal(fs.readFileSync(file, 'utf8'), output);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

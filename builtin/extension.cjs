@@ -178,6 +178,17 @@ class Chat {
     if (change.after === null) this.contextBefore.set(id + '-after', '');
     await vscode.commands.executeCommand('vscode.diff', vscode.Uri.parse('gptide-before:/' + id), change.after === null ? vscode.Uri.parse('gptide-before:/' + id + '-after') : vscode.Uri.file(file), `${change.relative} · 修改前 ↔ 当前`);
   }
+  async exportChat() {
+    await this.ready;
+    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || this.invalidated) return;
+    if (!chat.messages?.length && !chat.tasks?.length && !chat.draft?.trim()) return vscode.window.showInformationMessage('当前对话没有可导出的内容');
+    const core = require('./conversation.cjs'), snapshot = core.snapshot(chat), streaming = this.busy;
+    const extras = await vscode.window.showQuickPick([{ label: '包含任务日志', kind: 'tasks' }, { label: '包含未发送草稿', kind: 'draft' }], { canPickMany: true, title: '导出对话', placeHolder: '全部消息会导出，可选附加内容' }); if (!extras) return;
+    const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(this.project, core.filename(snapshot.name))), filters: { Markdown: ['md'] }, title: '导出当前项目对话' });
+    if (!uri || this.invalidated) return;
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(core.markdown(snapshot, this.project, { streaming, tasks: extras.some(e => e.kind === 'tasks'), draft: extras.some(e => e.kind === 'draft') }), 'utf8'));
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+  }
   async revert(file) {
     if (this.busy) return;
     const change = this.changes?.find(c => c.path === file); if (!change || change.status !== 'pending' || !review.within(this.project, file)) return;
@@ -384,7 +395,7 @@ class Chat {
     this.view = view; view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(this.context.extensionPath)] };
     const nonce = crypto.randomBytes(20).toString('hex');
     const source = name => fs.readFileSync(path.join(this.context.extensionPath, name), 'utf8');
-    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
+    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__FIND__', () => source('find.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
     view.webview.onDidReceiveMessage(async msg => {
       if (this.invalidated || msg.projectKey !== this.projectKey) return;
       if (msg.type !== 'ready') { await this.ready; if (this.invalidated) return; }
@@ -415,6 +426,8 @@ class Chat {
         if (msg.type === 'openLink' && /^https?:\/\//i.test(msg.url)) await vscode.env.openExternal(vscode.Uri.parse(msg.url));
         if (msg.type === 'settings') await vscode.commands.executeCommand('gptide.settings');
         if (msg.type === 'usage') await vscode.commands.executeCommand('gptide.usage');
+        if (msg.type === 'export') await this.exportChat();
+        if (msg.type === 'copyTasks' && Array.isArray(msg.ids)) { const ids = new Set(msg.ids.filter(id => typeof id === 'string').slice(0, 200)), selected = (this.tasks || []).filter(t => ids.has(t.turnId + ':' + t.id)); await vscode.env.clipboard.writeText(require('./conversation.cjs').taskReport(selected)); }
         if (msg.type === 'refresh' && !this.busy) { if (this.conflictFile) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(); if (!this.select(this.activeId) && !this.select(this.chats[0]?.id)) this.newChat(); if (preferences.values(vscode.workspace.getConfiguration('gptide')).autoConnect) { await this.connect(); await this.refreshAccount(); } }
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
@@ -456,6 +469,7 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration("gptide")) chat.post(); }));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('gptide.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => vscode.commands.executeCommand('gptide.chat.focus')));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.exportChat', () => chat.exportChat().catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.login', () => chat.login()));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy) return vscode.window.showInformationMessage('请先停止当前任务'); await chat.importCursor(); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.contextBefore?.get(uri.path.slice(1)) || '' }));

@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -92,6 +92,11 @@
         "command": "gptide.attachFolder",
         "title": "GptIDE: 引用文件夹",
         "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.exportChat",
+        "title": "GptIDE: 导出当前项目对话",
+        "enablement": "workspaceFolderCount == 1"
       }
     ],
     "keybindings": [
@@ -166,6 +171,10 @@
         },
         {
           "command": "gptide.attachFolder",
+          "when": "workspaceFolderCount == 1"
+        },
+        {
+          "command": "gptide.exportChat",
           "when": "workspaceFolderCount == 1"
         }
       ],
