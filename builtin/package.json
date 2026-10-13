@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -20,6 +20,8 @@
   ],
   "contributes": {
     "commands": [
+      { "command": "gptide.accountInfo", "title": "GPT 账户状态" },
+      { "command": "gptide.accountLogin", "title": "GPT 账户: 登录 / 切换 ChatGPT 账户" },
       {
         "command": "gptide.importVSCode",
         "title": "GptIDE: 导入 VS Code 设置和插件"
@@ -89,6 +91,7 @@
         }
       ],
       "commandPalette": [
+        { "command": "gptide.accountInfo", "when": "false" },
         {
           "command": "gptide.open",
           "when": "workspaceFolderCount == 1"

@@ -47,3 +47,14 @@
 .monaco-workbench .monaco-menu-container .monaco-menu {
   box-shadow: none !important;
 }
+.monaco-workbench .codicon-accounts-view-bar-icon::before {
+  display: inline-block !important;
+  content: "GPT";
+  font-family: "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -.3px;
+}
+.monaco-workbench .codicon-accounts-view-bar-icon .accounts-avatar {
+  display: none !important;
+}

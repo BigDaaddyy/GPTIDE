@@ -9,7 +9,8 @@ const styleStart = '/* GPTIDE WORKBENCH START */', styleEnd = '/* GPTIDE WORKBEN
 const originalCss = fs.readFileSync(workbenchCss, 'utf8').replace(/\n?\/\* GPTIDE WORKBENCH START \*\/[\s\S]*?\/\* GPTIDE WORKBENCH END \*\//g, '');
 fs.writeFileSync(workbenchCss, originalCss + '\n' + styleStart + '\n' + fs.readFileSync(path.join(__dirname, 'workbench.css'), 'utf8') + '\n' + styleEnd);
 const workbenchJs = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js');
-fs.writeFileSync(workbenchJs, require('./workbench-patch.cjs').hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8')));
+const nativePatch = require('./workbench-patch.cjs');
+fs.writeFileSync(workbenchJs, nativePatch.gptAccountMenu(nativePatch.hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8'))));
 const target = path.join(app, 'resources', 'app', 'extensions', 'gptide-chat');
 fs.mkdirSync(target, { recursive: true });
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(path.join(root, 'builtin', name), path.join(target, name));
