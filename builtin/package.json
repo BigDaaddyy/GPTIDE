@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -24,8 +24,14 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "gptide.accountInfo", "title": "GPT 账户状态" },
-      { "command": "gptide.accountLogin", "title": "GPT 账户: 登录 / 切换 ChatGPT 账户" },
+      {
+        "command": "gptide.accountInfo",
+        "title": "GPT 账户状态"
+      },
+      {
+        "command": "gptide.accountLogin",
+        "title": "GPT 账户: 登录 / 切换 ChatGPT 账户"
+      },
       {
         "command": "gptide.importVSCode",
         "title": "GptIDE: 导入 VS Code 设置和插件"
@@ -59,6 +65,18 @@
         "command": "gptide.newChat",
         "title": "GptIDE: 新建对话",
         "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.usage",
+        "title": "GptIDE: 快速查看用量"
+      },
+      {
+        "command": "gptide.settings",
+        "title": "GptIDE: 会话与 Codex 配置"
+      },
+      {
+        "command": "gptide.diagnostics",
+        "title": "GptIDE: 本机诊断"
       }
     ],
     "keybindings": [
@@ -95,7 +113,10 @@
         }
       ],
       "commandPalette": [
-        { "command": "gptide.accountInfo", "when": "false" },
+        {
+          "command": "gptide.accountInfo",
+          "when": "false"
+        },
         {
           "command": "gptide.open",
           "when": "workspaceFolderCount == 1"
@@ -158,6 +179,78 @@
           "type": "string",
           "default": "gpt-6.1-sol",
           "description": "首选模型。只使用会员登录。"
+        },
+        "gptide.connection.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "打开项目后自动连接；关闭后仅发送或登录时连接。"
+        },
+        "gptide.connection.timeoutSeconds": {
+          "type": "number",
+          "default": 45,
+          "minimum": 10,
+          "maximum": 180,
+          "description": "后端请求超时秒数，新连接生效。"
+        },
+        "gptide.approvalPolicy": {
+          "type": "string",
+          "enum": [
+            "on-request",
+            "untrusted",
+            "never"
+          ],
+          "default": "on-request",
+          "description": "授权策略；never 在现有沙箱权限内执行，越界请求拒绝。"
+        },
+        "gptide.agent.networkAccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "Agent 工作区沙箱网络权限。"
+        },
+        "gptide.defaultMode": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "ask",
+            "plan"
+          ],
+          "default": "agent",
+          "description": "新项目默认工作模式。"
+        },
+        "gptide.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "default": "medium",
+          "description": "新项目默认推理强度；以模型支持范围为准。"
+        },
+        "gptide.chat.submitKey": {
+          "type": "string",
+          "enum": [
+            "enter",
+            "ctrlEnter"
+          ],
+          "default": "enter",
+          "description": "消息发送快捷键。"
+        },
+        "gptide.context.importLimit": {
+          "type": "number",
+          "default": 180000,
+          "minimum": 20000,
+          "maximum": 300000,
+          "description": "导入 Cursor 背景最大字符数，原始记录保留。"
+        },
+        "gptide.usage.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "在状态栏显示本机缓存用量。"
         }
       }
     }

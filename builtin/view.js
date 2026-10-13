@@ -129,15 +129,15 @@ function render(s) {
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
-  el('connection').classList.toggle('connected', s.account?.type === 'chatgpt'); el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : '未登录';
+  el('connection').classList.toggle('connected', ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type)); el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
   el('login').textContent = s.account?.type === 'chatgpt' ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
   for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy;
-  const options = JSON.stringify([s.models, s.model, s.effort]);
+  const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
-    optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option('登录后加载模型', ''));
+    optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));
     for (const m of s.models) el('model').add(new Option((m.displayName || m.model).replace('GPT-', '').replaceAll('-', ' '), m.model)); el('model').value = s.model;
     el('effort').replaceChildren(); const model = s.models.find(m => m.model === s.model), names = { minimal: '最轻', low: '轻量', medium: '均衡', high: '深入', xhigh: '更深入', max: 'Max', ultra: 'Ultra' };
     for (const e of model?.supportedReasoningEfforts || []) el('effort').add(new Option(names[e.reasoningEffort] || e.reasoningEffort, e.reasoningEffort)); el('effort').value = s.effort;
@@ -158,12 +158,12 @@ function resizeInput() { el('input').style.height = 'auto'; el('input').style.he
 window.addEventListener('message', event => { const data = event.data; if (data.projectKey !== projectKey || invalidated) return; if (data.type === 'reset') { invalidated = true; document.body.hidden = true; return; } if (data.type === 'state') render(data); if (data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { resizeInput(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });
-el('input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!state.busy) el('send').click(); } };
+el('input').onkeydown = e => { const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey; if (e.key === 'Enter' && sendKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!state.busy) el('send').click(); } };
 el('send').onclick = () => { if (state.busy) { post('stop'); return; } const text = el('input').value.trim(); if (text) { submittedDraft = el('input').value; post('send', { text, mode: el('mode').value }); } };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
-for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings']) el(id).onclick = () => { post(id); el('menu').hidden = true; if (id === 'new') el('input').focus(); };
+for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage']) el(id).onclick = () => { post(id); el('menu').hidden = true; if (id === 'new') el('input').focus(); };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => el('messages').scrollTop = el('messages').scrollHeight;

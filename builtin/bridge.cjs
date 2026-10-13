@@ -16,7 +16,7 @@ function findCodex(explicit) {
 }
 
 class Bridge extends EventEmitter {
-  constructor(executable, cwd) { super(); this.executable = executable; this.cwd = cwd; this.pending = new Map(); this.nextId = 1; }
+  constructor(executable, cwd, options = {}) { super(); this.executable = executable; this.cwd = cwd; this.timeout = options.timeout || 45000; this.pending = new Map(); this.nextId = 1; }
   async start() {
     // Ignore API credentials inherited from shells. Force the official OpenAI provider.
     const env = { ...process.env };
@@ -40,7 +40,7 @@ class Bridge extends EventEmitter {
     return this;
   }
   send(value) { if (!this.child || this.child.killed) throw new Error('Codex 未连接'); this.child.stdin.write(JSON.stringify(value) + '\n'); }
-  call(method, params = {}, timeout = 45000) {
+  call(method, params = {}, timeout = this.timeout) {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`${method} 超时${this.lastDiagnostic ? ': ' + this.lastDiagnostic : ''}`)); }, timeout);
