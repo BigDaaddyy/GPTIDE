@@ -26,14 +26,15 @@ function verify() {
   state.tasks[0] = { ...state.tasks[0], status: 'failed', exitCode: 1, output: 'updated output' }; send();
   const taskStable = d.querySelector('.task-row') === taskRow && taskRow.open && taskRow.querySelector('.task-state').textContent === '失败' && taskRow.querySelector('.task-output').textContent === 'updated output';
   d.querySelector('#refresh').click();
-  return { initial, stable, updated, expanded, otherEmpty, draftRestored, taskStable, durationMs: Math.round(performance.now() - began) };
+  const bodyStyle = w.getComputedStyle(d.body), compact = bodyStyle.paddingLeft === '0px' && bodyStyle.paddingRight === '0px' && d.querySelector('.composer').getBoundingClientRect().height <= 90;
+  return { initial, stable, updated, expanded, otherEmpty, draftRestored, taskStable, compact, durationMs: Math.round(performance.now() - began) };
 }
 (async () => {
   const targets = await (await fetch('http://127.0.0.1:9337/json/list')).json();
   for (const target of targets.filter(t => t.type === 'iframe')) {
     const result = await call(target.webSocketDebuggerUrl, '(' + verify.toString() + ')()'); if (!result) continue;
     assert.equal(result.initial, 100); assert.equal(result.stable, true); assert.equal(result.updated, true); assert.equal(result.expanded, 200);
-    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); assert.equal(result.taskStable, true); console.log(JSON.stringify(result)); return;
+    assert.equal(result.otherEmpty, true); assert.equal(result.draftRestored, true); assert.equal(result.taskStable, true); assert.equal(result.compact, true); console.log(JSON.stringify(result)); return;
   }
   throw new Error('Open bundled example-project with debug port 9337');
 })().catch(e => { console.error(e.message); process.exitCode = 1; });

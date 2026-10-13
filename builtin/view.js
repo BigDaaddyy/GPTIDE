@@ -48,14 +48,9 @@ function renderMessages(s) {
   const nextLayout = JSON.stringify([chatKey, s.source, !s.messages.length]);
   if (nextLayout !== layoutKey) { box.replaceChildren(); messageRows.clear(); layoutKey = nextLayout; }
   if (!s.messages.length) {
-    if (box.children.length) return;
-    const empty = make('section', 'empty'); empty.append(make('h2', '', '从这里继续构建'), make('p', '', s.cursorCount ? `已读取 ${s.cursorCount} 条 Cursor 对话，在历史中选择即可继续。` : '打开项目，引用文件，把想做的事情写下来。'));
-    for (const [title, prompt] of [['了解这个项目', '请分析这个项目的结构、运行方式和当前进度。'], ['规划下一步', '请先阅读项目，给出下一步改进计划和验证步骤。'], ['检查代码问题', '请检查项目中的明确错误，并给出具体文件与修复建议。']]) {
-      const suggestion = make('button', 'suggestion', title); suggestion.append(make('span', '', '↗')); suggestion.onclick = () => { el('input').value = prompt; el('input').focus(); resizeInput(); }; empty.append(suggestion);
-    }
-    box.append(empty);
+    el('scroll-bottom').hidden = true; return;
   }
-  if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor 历史已加载。下一条消息会以此为背景创建新的 GptIDE 对话。'));
+  if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor · 导入记录'));
   const start = Math.max(0, s.messages.length - visibleMessages);
   let more = box.querySelector('.load-older');
   if (start && !more) { more = make('button', 'load-older text-button'); box.prepend(more); }
@@ -145,7 +140,7 @@ function render(s) {
   }
   if (!el('history-panel').hidden) renderHistory();
 }
-function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(64, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; api.setState({ drafts, mode: el('mode').value }); }
+function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) drafts[draftKey] = el('input').value; api.setState({ drafts, mode: el('mode').value }); }
 window.addEventListener('message', event => { if (event.data.type === 'state') render(event.data); if (event.data.type === 'sent') { if (el('input').value === submittedDraft) el('input').value = ''; submittedDraft = undefined; resizeInput(); } });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { resizeInput(); if (el('input').value.endsWith('@') && !state.busy) post('attach'); });

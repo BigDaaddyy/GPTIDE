@@ -302,6 +302,8 @@ class Chat {
   dispose() { clearTimeout(this.postTimer); this.save(); this.bridge?.dispose(); }
 }
 function activate(context) {
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.commands.executeCommand('workbench.action.reloadWindow')));
+  if (!vscode.workspace.workspaceFolders?.length) return;
   const chat = new Chat(context); context.subscriptions.push(chat);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('gptide.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => vscode.commands.executeCommand('gptide.chat.focus')));
@@ -311,7 +313,6 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.inlineEdit', () => chat.inlineEdit().catch(error => vscode.window.showErrorMessage(error.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.newChat', () => { if (!chat.busy) { chat.select(null); chat.save(); vscode.commands.executeCommand('gptide.chat.focus'); } }));
-  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.commands.executeCommand('workbench.action.reloadWindow')));
   vscode.commands.executeCommand('gptide.chat.focus');
 }
 module.exports = { activate };
