@@ -8,6 +8,8 @@ const workbenchCss = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench'
 const styleStart = '/* GPTIDE WORKBENCH START */', styleEnd = '/* GPTIDE WORKBENCH END */';
 const originalCss = fs.readFileSync(workbenchCss, 'utf8').replace(/\n?\/\* GPTIDE WORKBENCH START \*\/[\s\S]*?\/\* GPTIDE WORKBENCH END \*\//g, '');
 fs.writeFileSync(workbenchCss, originalCss + '\n' + styleStart + '\n' + fs.readFileSync(path.join(__dirname, 'workbench.css'), 'utf8') + '\n' + styleEnd);
+const workbenchJs = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js');
+fs.writeFileSync(workbenchJs, require('./workbench-patch.cjs').hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8')));
 const target = path.join(app, 'resources', 'app', 'extensions', 'gptide-chat');
 fs.mkdirSync(target, { recursive: true });
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(path.join(root, 'builtin', name), path.join(target, name));
@@ -15,6 +17,7 @@ const runtime = path.join(root, 'runtime'); fs.mkdirSync(runtime, { recursive: t
 const productFile = path.join(app, 'resources', 'app', 'product.json'); const product = JSON.parse(fs.readFileSync(productFile, 'utf8'));
 Object.assign(product, { nameShort: 'GptIDE', nameLong: 'GptIDE', applicationName: 'gptide', dataFolderName: '.gptide', win32AppUserModelId: 'GptIDE.Desktop', urlProtocol: 'gptide' });
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.css'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchCss)).digest('base64').replace(/=+$/, '');
+if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.js'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchJs)).digest('base64').replace(/=+$/, '');
 fs.writeFileSync(productFile, JSON.stringify(product, null, 2));
 const manifestCache = path.join(root, 'data', 'user', 'CachedProfilesData', '__default__profile__', 'extensions.builtin.cache');
 if (fs.existsSync(manifestCache)) fs.unlinkSync(manifestCache);
