@@ -2,6 +2,11 @@ const test = require('node:test'), assert = require('node:assert/strict'), Modul
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const config = { get: (key, fallback) => fallback };
 const vscode = { workspace: { isTrusted: true, getConfiguration: () => config }, window: {} };
+vscode.CancellationTokenSource = class {
+  constructor() { this.listeners = new Set(); this.token = { isCancellationRequested: false, onCancellationRequested: callback => { this.listeners.add(callback); return { dispose: () => this.listeners.delete(callback) }; } }; }
+  cancel() { this.token.isCancellationRequested = true; for (const callback of this.listeners) callback(); }
+  dispose() { this.listeners.clear(); }
+};
 const originalRequire = Module.prototype.require;
 let Chat;
 try { Module.prototype.require = function(id) { return id === 'vscode' ? vscode : originalRequire.apply(this, arguments); }; Chat = require('../builtin/extension.cjs').Chat; }
@@ -101,5 +106,49 @@ test('manual cache cleanup retains backup and conflict recovery references', () 
     vscode.window.showInformationMessage = () => {};
     chat.cleanupCheckpoints(); assert.equal(chat.checkpointStore.get(records[0].changes[0].afterRef), 'backup'); assert.equal(chat.checkpointStore.get(records[1].changes[0].afterRef), 'conflict');
     assert.throws(() => chat.checkpointStore.get(records[2].changes[0].afterRef), /缺失/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('approval rejects foreign turns and replies to original bridge after a connection changes', async () => {
+  const chat = fixture(), replies = [], newReplies = []; chat.busy = true; chat.turnId = 'current'; chat.bridge = { reply: (id, result) => replies.push(result), send: () => {} };
+  const request = { id: 1, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread', turnId: 'current', command: 'fixture' } };
+  vscode.window.showWarningMessage = () => { throw new Error('Foreign request must not open a prompt'); };
+  await chat.approve({ ...request, params: { ...request.params, threadId: 'foreign' } }); await chat.approve({ ...request, params: { ...request.params, turnId: 'old' } }); assert.deepEqual(replies, [{ decision: 'decline' }, { decision: 'decline' }]);
+  let resolve, prompts = 0; vscode.window.showWarningMessage = () => { prompts++; return new Promise(done => { resolve = done; }); };
+  const origin = chat.bridge, pending = chat.approve(request, origin); await chat.approve(request, origin); assert.equal(prompts, 1);
+  chat.bridge = { reply: (id, result) => newReplies.push(result) }; resolve('允许此次'); await pending;
+  assert.deepEqual(replies.at(-1), { decision: 'decline' }); assert.deepEqual(newReplies, []);
+});
+
+test('resolved Agent questions cancel native prompt and never send duplicate answers', async () => {
+  const chat = fixture(), replies = []; chat.busy = true; chat.turnId = 'current'; chat.bridge = { reply: (id, result) => replies.push(result), send: () => {} };
+  const request = { id: 'input', method: 'item/tool/requestUserInput', params: { threadId: 'thread', turnId: 'current', questions: [{ id: 'a', header: 'A', question: 'Choose', options: [{ label: 'A', description: 'First' }] }] } };
+  vscode.window.showQuickPick = (items, options, token) => new Promise(resolve => { token.onCancellationRequested(() => resolve(undefined)); });
+  const pending = chat.approve(request); chat.onNotification({ method: 'serverRequest/resolved', params: { requestId: 'input', threadId: 'thread' } }); await pending;
+  assert.deepEqual(replies, []); assert.equal(chat.pendingRequests.size, 0); assert.equal(chat.messages.length, 0);
+});
+
+test('late events cannot finish newer turns or append messages to idle conversations', () => {
+  const chat = fixture(); chat.busy = true; chat.turnId = 'new'; chat.tasks = []; chat.currentTaskTurn = 2;
+  chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'old', status: 'completed' } } }); assert.equal(chat.busy, true);
+  chat.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 'foreign', turnId: 'new', itemId: 'item', delta: 'foreign' } }); assert.equal(chat.messages.length, 0);
+  chat.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 'thread', turnId: 'new', itemId: 'item', delta: 'current' } }); assert.equal(chat.messages[0].text, 'current');
+  chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'new', status: 'completed' } } }); assert.equal(chat.busy, false);
+  chat.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 'thread', turnId: 'new', itemId: 'item', delta: 'late' } }); assert.equal(chat.messages[0].text, 'current');
+  chat.busy = true; chat.turnId = null;
+  chat.onNotification({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'new' } } }); assert.equal(chat.turnId, null);
+  chat.onNotification({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'next' } } }); assert.equal(chat.turnId, 'next');
+});
+
+test('terminal errors retain partial file checkpoints and mark unfinished tasks failed', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-failed-turn-'));
+  try {
+    const file = path.join(root, 'a.txt'), chat = fixture(); chat.project = root; chat.busy = true; chat.turnId = 'turn'; chat.currentTaskTurn = 1;
+    chat.checkpointStore = new (require('../builtin/checkpoints.cjs').Checkpoints)(path.join(root, 'cache'), root, 'project');
+    fs.writeFileSync(file, 'before'); chat.baseline = require('../builtin/review.cjs').snapshot(root); fs.writeFileSync(file, 'partial edit'); chat.candidates = new Map([[file, 'update']]);
+    chat.tasks = [{ id: 'command', turnId: 'turn', status: 'running' }];
+    chat.onNotification({ method: 'error', params: { threadId: 'thread', turnId: 'turn', willRetry: false, error: { message: 'fixture disconnection' } } });
+    assert.equal(chat.busy, false); assert.equal(chat.tasks[0].status, 'failed'); assert.equal(chat.chats[0].checkpoints.length, 1); assert.equal(chat.checkpointStore.materialize(chat.changes[0]).after, 'partial edit'); assert.equal(chat.baseline, null);
+    chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } }); assert.equal(chat.chats[0].checkpoints.length, 1); assert.equal(chat.status, 'fixture disconnection');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

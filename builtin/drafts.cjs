@@ -2,9 +2,9 @@ const storage = require('./storage.cjs');
 class Drafts {
   constructor(file, projectKey) {
     this.file = file; this.projectKey = projectKey;
-    const loaded = storage.read(file); this.revision = loaded.revision;
-    if (loaded.state && loaded.state.projectKey !== projectKey) throw new Error('草稿不属于当前项目');
-    this.records = new Map((loaded.state?.chats || []).filter(c => typeof c.id === 'string' && typeof c.draft === 'string').map(c => [c.id, { id: c.id, draft: c.draft.slice(0, 100000), draftUpdatedAt: Number(c.draftUpdatedAt) || 0 }]));
+    this.validateOwnership = state => { if (state.projectKey !== projectKey) { const error = new Error('草稿不属于当前项目'); error.code = 'GPTIDE_FOREIGN'; throw error; } };
+    const loaded = storage.read(file, this.validateOwnership); this.revision = loaded.revision;
+    this.records = new Map((loaded.state?.chats || []).filter(c => typeof c?.id === 'string' && typeof c.draft === 'string').map(c => [c.id, { id: c.id, draft: c.draft.slice(0, 100000), draftUpdatedAt: Number(c.draftUpdatedAt) || 0 }]));
     this.recovered = loaded.recovered;
   }
   apply(chats) {
@@ -14,11 +14,11 @@ class Drafts {
     const record = { id, draft: text.slice(0, 100000), draftUpdatedAt: time };
     this.records.set(id, record);
     const state = { projectKey: this.projectKey, chats: [...this.records.values()] };
-    if (this.conflictFile) { storage.write(this.conflictFile, state); throw new Error('另一窗口已更新草稿，本窗口内容保留为冲突副本'); }
-    try { this.revision = storage.write(this.file, state, this.revision); }
+    if (this.conflictFile) { storage.write(this.conflictFile, state, undefined, this.validateOwnership); throw new Error('另一窗口已更新草稿，本窗口内容保留为冲突副本'); }
+    try { this.revision = storage.write(this.file, state, this.revision, this.validateOwnership); }
     catch (error) { if (error.code === 'GPTIDE_CONFLICT') this.conflictFile = error.conflictFile; throw error; }
     return record;
   }
-  remove(id) { this.records.delete(id); this.revision = storage.write(this.file, { projectKey: this.projectKey, chats: [...this.records.values()] }, this.revision); }
+  remove(id) { this.records.delete(id); this.revision = storage.write(this.file, { projectKey: this.projectKey, chats: [...this.records.values()] }, this.revision, this.validateOwnership); }
 }
 module.exports = { Drafts };

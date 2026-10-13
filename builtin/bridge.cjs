@@ -28,18 +28,20 @@ class Bridge extends EventEmitter {
     this.child.on('error', e => this.fail(e));
     this.child.on('exit', (code) => this.fail(new Error(`Codex 已退出 (${code})`)));
     this.child.stderr.on('data', d => { this.lastDiagnostic = String(d).slice(-2000); });
-    createInterface({ input: this.child.stdout }).on('line', line => {
-      let value; try { value = JSON.parse(line); } catch { return; }
-      if (value.method) { this.emit(value.id === undefined ? 'notification' : 'request', value); return; }
-      const entry = this.pending.get(value.id); if (!entry) return;
-      clearTimeout(entry.timer); this.pending.delete(value.id);
-      if (value.error) entry.reject(new Error(value.error.message)); else entry.resolve(value.result);
-    });
+    createInterface({ input: this.child.stdout }).on('line', line => this.receive(line));
     await this.call('initialize', { clientInfo: { name: 'gptide_desktop', title: 'GptIDE', version: require('./package.json').version } });
     this.send({ method: 'initialized', params: {} });
     return this;
   }
   send(value) { if (!this.child || this.child.killed) throw new Error('Codex 未连接'); this.child.stdin.write(JSON.stringify(value) + '\n'); }
+  receive(line) {
+    let value; try { value = JSON.parse(line); } catch { return; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    if (value.method !== undefined) { if (typeof value.method === 'string' && value.method) this.emit(value.id === undefined ? 'notification' : 'request', value); return; }
+    const entry = this.pending.get(value.id); if (!entry) return;
+    clearTimeout(entry.timer); this.pending.delete(value.id);
+    if (value.error) entry.reject(new Error(typeof value.error.message === 'string' ? value.error.message : 'Codex 请求失败')); else entry.resolve(value.result);
+  }
   call(method, params = {}, timeout = this.timeout) {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;

@@ -178,7 +178,7 @@ function render(s) {
   if (pendingFocusChat) { const target = [...el('chat-tabs').querySelectorAll('[role="tab"]')].find(b => b.dataset.chatId === pendingFocusChat); target?.focus(); pendingFocusChat = undefined; }
   renderMessages(s); renderTasks(s); state = s;
   updateFind(false);
-  el('input').disabled = pendingTabChange || !!s.loadingScope;
+  el('input').disabled = pendingTabChange || !!s.loadingScope || !!s.storageBlocked;
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
@@ -188,7 +188,8 @@ function render(s) {
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
   for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
-  el('send').disabled = !!s.reviewBusy;
+  for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
+  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked;
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
     optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));

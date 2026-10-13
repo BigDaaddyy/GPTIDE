@@ -7,4 +7,7 @@ function partition(chats, projectKey) {
   for (const chat of chats || []) if (chat?.id) (chat.projectKey === projectKey ? owned : unverified).push(chat);
   return { owned, unverified };
 }
-module.exports = { normalize, key, matches, partition };
+function validateState(state, projectKey, project) {
+  if (state.projectKey && state.projectKey !== projectKey || state.projectPath && !matches(state.projectPath, project)) { const error = new Error('历史文件的项目归属不匹配，已拒绝读取。'); error.code = 'GPTIDE_FOREIGN'; throw error; }
+}
+module.exports = { normalize, key, matches, partition, validateState };
