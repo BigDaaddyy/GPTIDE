@@ -172,6 +172,7 @@ class Chat {
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
     this.view?.webview.postMessage({ type: 'state', projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
+  schedulePost() { if (!this.postTimer && !this.invalidated) this.postTimer = setTimeout(() => { this.postTimer = null; this.post(); }, 60); }
   async attachFiles(current = false) {
     await this.ready;
     if (!this.project || this.busy) return;
@@ -479,13 +480,13 @@ class Chat {
     }
     if (method === 'turn/started' && this.pendingSubmission?.threadId === p.threadId) this.acknowledgeSubmission(this.pendingSubmission.epoch);
     if (p && tasklog.update(this.tasks || (this.tasks = []), method, p, this.currentTaskTurn)) {
-      if (method.endsWith('/outputDelta')) { if (!this.postTimer) this.postTimer = setTimeout(() => this.post(), 60); }
+      if (method.endsWith('/outputDelta')) this.schedulePost();
       else { if (method === 'item/completed') this.save(); this.post(); }
     }
     if (method === 'item/agentMessage/delta' && typeof p.itemId === 'string' && typeof p.delta === 'string') {
       let item = this.messages.find(m => m.itemId === p.itemId);
       if (!item) { item = { role: 'assistant', text: '', itemId: p.itemId }; this.messages.push(item); }
-      item.text += p.delta; this.post();
+      item.text += p.delta; this.schedulePost();
     }
     if (method === 'item/started') { this.activity = p.item?.type === 'commandExecution' ? '运行：' + p.item.command : p.item?.type === 'fileChange' ? '正在修改文件' : '正在处理项目'; this.post(); }
     if (method === 'item/completed' && p.item?.type === 'fileChange' && this.candidates) {

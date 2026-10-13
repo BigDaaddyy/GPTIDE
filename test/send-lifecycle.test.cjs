@@ -214,3 +214,13 @@ test('project login cannot connect during a running task and disposal invalidate
   chat.pendingRequests = new Map([['request', { resolved: false, token: { cancel: () => { canceled = true; } } }]]); chat.bridge = { dispose: () => { disposed++; } };
   chat.dispose(); assert.equal(chat.invalidated, true); assert.equal(canceled, true); assert.equal(chat.pendingRequests.get('request').resolved, true); assert.equal(disposed, 1);
 });
+
+test('stream bursts coalesce state snapshots and final message flushes pending updates immediately', async () => {
+  const chat = fixture(), snapshots = []; chat.post = Chat.prototype.post; chat.busy = true; chat.turnId = 'stream'; chat.tasks = [];
+  chat.view.webview.postMessage = state => snapshots.push(state);
+  for (let i = 0; i < 100; i++) chat.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 'thread', turnId: 'stream', itemId: 'message', delta: 'x' } });
+  assert.equal(snapshots.length, 0); await new Promise(resolve => setTimeout(resolve, 90)); assert.equal(snapshots.length, 1); assert.equal(snapshots[0].messages[0].text.length, 100);
+  chat.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 'thread', turnId: 'stream', itemId: 'message', delta: 'pending' } });
+  chat.onNotification({ method: 'item/completed', params: { threadId: 'thread', turnId: 'stream', item: { id: 'message', type: 'agentMessage', text: 'final' } } });
+  assert.equal(snapshots.length, 2); assert.equal(snapshots.at(-1).messages[0].text, 'final'); await new Promise(resolve => setTimeout(resolve, 90)); assert.equal(snapshots.length, 2); assert.equal(chat.postTimer, null);
+});
