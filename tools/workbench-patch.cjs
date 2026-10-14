@@ -28,4 +28,11 @@ function homePage(source, renderSource) {
   const method = renderSource.trim().replace(/^function render\(\)/, 'render()');
   return source.slice(0, begin) + marker + method + source.slice(end);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu, homePage };
+function inlineInput(source, widgetSource) {
+  const start = '/* GPTIDE INLINE START */', end = '/* GPTIDE INLINE END */';
+  source = source.replace(/\/\* GPTIDE INLINE START \*\/[\s\S]*?\/\* GPTIDE INLINE END \*\//g, '');
+  const anchor = '$e.registerCommand("noop",()=>{});';
+  if (source.split(anchor).length !== 2 || !source.includes('const o=e.get(Ai),r=o.getFocusedCodeEditor()||o.getActiveCodeEditor()')) throw new Error('原生编辑器命令结构已变化，请更新 Ctrl+K 补丁');
+  return source.replace(anchor, start + widgetSource + end + anchor);
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput };

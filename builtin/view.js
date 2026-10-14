@@ -52,7 +52,7 @@ function renderHistory() {
 }
 function renderQueue(s) {
   const queue = s.queue || []; el('queue-panel').hidden = !queue.length; el('queue-count').textContent = queue.length;
-  el('queue-status').textContent = s.queuePaused ? '已暂停' : '本轮完成后继续'; el('queue-pause').textContent = s.queuePaused ? '继续队列' : '暂停队列'; el('queue-pause').disabled = !!s.storageBlocked;
+  el('queue-status').textContent = s.queuePaused ? '已暂停' : '本轮完成后继续'; el('queue-pause').textContent = s.queuePaused ? '继续队列' : '暂停队列'; el('queue-pause').disabled = !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked;
   el('queue-list').replaceChildren();
   for (const [index, item] of queue.entries()) {
     const row = make('div', 'queue-row'), text = make('span', 'queue-text', item.text.slice(0, 160)); text.title = item.text.slice(0, 1000); row.append(make('span', 'badge', item.mode), text);
@@ -207,7 +207,7 @@ function render(s) {
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
   for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
-  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
+  el('send').disabled = !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
   el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
   el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
   renderQueue(s);

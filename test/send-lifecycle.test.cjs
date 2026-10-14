@@ -78,7 +78,7 @@ test('inline prompt rechecks project, trust, review lock and document before any
       const document = { uri: { scheme: 'file', fsPath: file }, version: 1, languageId: 'javascript', getText: () => text, offsetAt: position => position.offset };
       vscode.workspace.isTrusted = true; vscode.window.activeTextEditor = { document, selection: { start: { offset: 0 }, end: { offset: 10 }, isEmpty: false } };
       vscode.window.showInputBox = () => new Promise(resolve => { finish = resolve; });
-      const pending = chat.inlineEdit(); await Promise.resolve();
+      const pending = chat.inlineEdit(); await new Promise(resolve => setImmediate(resolve));
       if (kind === 'project') chat.invalidated = true;
       if (kind === 'trust') vscode.workspace.isTrusted = false;
       if (kind === 'review') chat.reviewBusy = true;
@@ -99,7 +99,7 @@ test('closing a project cancels its active inline generation and releases the lo
     vscode.window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: file }, version: 1, languageId: 'javascript', getText: () => 'let a = 1;', offsetAt: position => position.offset }, selection: { start: { offset: 0 }, end: { offset: 10 }, isEmpty: false } };
     vscode.window.showInputBox = async () => 'QA instruction'; vscode.window.withProgress = (options, action) => action({}, progressToken.token);
     agent.generate = ({ token }) => { received = token; return new Promise((resolve, reject) => token.onCancellationRequested(() => reject(new Error('已取消代码改写。')))); };
-    const pending = chat.inlineEdit(); await Promise.resolve(); await Promise.resolve(); assert.equal(chat.inlineBusy, true);
+    const pending = chat.inlineEdit(); await new Promise(resolve => setImmediate(resolve)); assert.equal(chat.inlineBusy, true);
     chat.invalidateProject(); await assert.rejects(pending, /已取消/); assert.equal(received.isCancellationRequested, true); assert.equal(chat.inlineBusy, false); assert.equal(chat.inlineCancellation, null); assert.equal(fs.readFileSync(file, 'utf8'), 'let a = 1;');
   } finally { agent.generate = originalGenerate; progressToken.dispose(); vscode.Range = saved.Range; vscode.EndOfLine = saved.EndOfLine; vscode.ProgressLocation = saved.ProgressLocation; vscode.window.activeTextEditor = saved.editor; vscode.window.showInputBox = saved.input; vscode.window.withProgress = saved.progress; fs.rmSync(root, { recursive: true, force: true }); }
 });

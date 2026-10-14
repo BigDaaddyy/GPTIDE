@@ -11,6 +11,7 @@ fs.writeFileSync(workbenchCss, originalCss + '\n' + styleStart + '\n' + fs.readF
 const workbenchJs = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js');
 const nativePatch = require('./workbench-patch.cjs');
 fs.writeFileSync(workbenchJs, nativePatch.homePage(nativePatch.gptAccountMenu(nativePatch.hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8'))), fs.readFileSync(path.join(__dirname, 'home-render.js'), 'utf8')));
+fs.writeFileSync(workbenchJs, nativePatch.inlineInput(fs.readFileSync(workbenchJs, 'utf8'), fs.readFileSync(path.join(__dirname, 'inline-widget.js'), 'utf8')));
 const target = path.join(app, 'resources', 'app', 'extensions', 'gptide-chat');
 fs.mkdirSync(target, { recursive: true });
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(path.join(root, 'builtin', name), path.join(target, name));
