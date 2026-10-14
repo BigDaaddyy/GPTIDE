@@ -3,6 +3,7 @@ const { LoginSession } = require('../builtin/login-session.cjs');
 function fixture(options = {}) {
   const bridge = new EventEmitter(), states = [], opened = []; let ends = 0, refreshes = 0;
   bridge.call = async () => ({ type: 'chatgpt', loginId: 'current', authUrl: 'https://example.invalid/fixture' });
+  bridge.dispose=()=>{bridge.closed=true;bridge.emit('disconnected');};
   const session = new LoginSession(bridge, { open: async url => { opened.push(url); return true; }, refresh: async () => { refreshes++; }, state: value => states.push(value), end: () => ends++, ...options });
   const notify = (loginId, success = true) => bridge.emit('notification', { method: 'account/login/completed', params: { loginId, success } });
   return { bridge, session, notify, states, opened, get ends() { return ends; }, get refreshes() { return refreshes; } };
@@ -28,7 +29,15 @@ test('failed browser and non ChatGPT or unsafe URLs release flow without success
 });
 test('timeout and disconnect release listeners and cannot consume late login completions', async () => {
   const f = fixture({ timeout: 10 }); await f.session.begin(); await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(f.ends, 1); assert.ok(f.states.at(-1).includes('超时')); f.notify('current'); assert.equal(f.refreshes, 0);
+  assert.equal(f.ends, 1); assert.equal(f.bridge.closed,true); assert.ok(f.states.at(-1).includes('超时')); f.notify('current'); assert.equal(f.refreshes, 0);
   const disconnected = fixture(); await disconnected.session.begin(); disconnected.bridge.emit('disconnected'); disconnected.notify('current');
   assert.equal(disconnected.ends, 1); assert.equal(disconnected.refreshes, 0);
+});
+test('explicit cancel uses only its loginId and releases after cancellation acknowledgment',async()=>{
+  const f=fixture();await f.session.begin();let finish,calls=0;f.bridge.call=async(method,params)=>{calls++;assert.equal(method,'account/login/cancel');assert.deepEqual(params,{loginId:'current'});return new Promise(resolve=>{finish=resolve;});};
+  const pending=f.session.cancel();await f.session.cancel();assert.equal(f.ends,0);assert.equal(calls,1);finish({status:'canceled'});await pending;assert.equal(f.ends,1);assert.equal(f.states.at(-1),'已取消 ChatGPT 登录');f.notify('current');assert.equal(f.refreshes,0);
+});
+test('cancel failure retains the lock for retry while notFound refreshes the actual account',async()=>{
+  const f=fixture();await f.session.begin();f.bridge.call=async()=>{throw Error('fixture timeout');};await assert.rejects(f.session.cancel(),/timeout/);assert.equal(f.ends,0);assert.equal(f.session.canceling,false);
+  f.bridge.call=async()=>({status:'notFound'});await f.session.cancel();assert.equal(f.refreshes,1);assert.equal(f.ends,1);
 });

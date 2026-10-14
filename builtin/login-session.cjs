@@ -20,19 +20,35 @@ class LoginSession {
       this.id = result.loginId;
       const early = this.early.get(this.id); this.early.clear();
       if (early) { await this.complete(early); return; }
-      this.timer = setTimeout(() => { this.state('登录等待已超时，请重新登录'); this.dispose(); }, this.timeout); this.timer.unref?.();
+      this.timer = setTimeout(() => { this.state('登录等待已超时，请重新登录'); this.bridge.dispose(new Error('登录等待已超时，请重新连接')); this.dispose(); }, this.timeout); this.timer.unref?.();
       if (!await this.open(result.authUrl)) throw new Error('无法打开登录页面');
       if (!this.done && !this.completing) this.state('请在浏览器完成 ChatGPT 登录');
-    } catch (error) { if (!this.done) { this.dispose(); throw error; } }
+    } catch (error) { if (!this.done) { this.bridge.dispose(error); this.dispose(); throw error; } }
   }
   async complete(params) {
     if (this.done || this.completing) return;
-    this.completing = true; clearTimeout(this.timer);
+    this.completing = true; clearTimeout(this.timer); this.state('正在确认 ChatGPT 账户…');
     try {
       if (!params.success) this.state(typeof params.error === 'string' ? 'ChatGPT 登录未完成：' + params.error.slice(0, 500) : 'ChatGPT 登录未完成');
       else { await this.refresh(); if (!this.done) this.state('ChatGPT 账户已登录'); }
     } catch (error) { if (!this.done) this.state('账户刷新失败：' + error.message); }
     finally { this.dispose(); }
+  }
+  async cancel() {
+    if (this.done || this.canceling) return;
+    if (!this.id || this.completing) throw new Error('正在准备或确认登录，请稍后重试');
+    this.canceling = true; this.state('正在取消 ChatGPT 登录…');
+    try {
+      const result = await this.bridge.call('account/login/cancel', { loginId: this.id });
+      if (this.done) return;
+      if (!['canceled','notFound'].includes(result?.status)) throw new Error('登录取消响应无效');
+      if (result.status === 'notFound') {
+        this.completing = true; clearTimeout(this.timer);
+        try { await this.refresh(); if (!this.done) this.state('登录等待已结束，账户状态已刷新'); }
+        catch (error) { if (!this.done) this.state('登录等待已结束；请重新连接刷新账户：' + error.message); }
+      } else this.state('已取消 ChatGPT 登录');
+      this.dispose();
+    } catch (error) { if (!this.done) { this.canceling = false; this.state('取消登录失败，请重试：' + error.message); throw error; } }
   }
   dispose() {
     if (this.done) return; this.done = true; clearTimeout(this.timer); this.early.clear();

@@ -26,4 +26,6 @@ async function login(vscode, context, chat) {
     }); await record.session.begin();
   } catch (error) { dispose(); throw error; }
 }
-module.exports = { localInfo, login };
+function canCancel(context, chat) { const session = chat?.loginSession || activeLogins.get(context)?.session; return !!session?.id && !session.done && !session.completing && !session.canceling; }
+async function cancel(context, chat) { const session = chat?.loginSession || activeLogins.get(context)?.session; if (!session) return; return session.cancel(); }
+module.exports = { localInfo, login, canCancel, cancel };

@@ -7,6 +7,7 @@ const drafts = previous.drafts || {}; let draftKey, submittedDraft, submittedSen
 const sendPrefix = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); let sendSequence = 0, inputRevision = 0;
 const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0, pendingFocusChat;
 let pendingTabChange = false, pendingSend = false, pendingQueue = false;
+let handledFocusId;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
@@ -203,6 +204,7 @@ function render(s) {
   el('connection').classList.toggle('connected', s.connected === true); el('connection').title = s.loginPending ? '等待 ChatGPT 登录' : s.connected ? 'ChatGPT 已连接' : '未连接'; el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
   el('login').textContent = s.loginPending ? '等待 ChatGPT 登录…' : ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type) ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
   el('login').disabled = !!s.operationLocked;
+  el('login-state').hidden = !s.loginPending; el('cancel-login').disabled = !s.canCancelLogin;
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
@@ -246,6 +248,7 @@ function render(s) {
     }
   }
   if (!el('history-panel').hidden) renderHistory();
+  if (s.focusRequestId && s.focusRequestId !== handledFocusId && !el('input').disabled) { handledFocusId = s.focusRequestId; closeMenu(); if (!el('history-panel').hidden) closeHistory(); el('input').focus(); post('focusHandled', { id: s.focusRequestId }); }
   updateQuickActions();
 }
 function closeQuickActions(dismiss = false) {
@@ -340,6 +343,7 @@ el('enqueue').onclick = () => {
   flushDraft(); closeQuickActions(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
 };
 el('queue-pause').onclick = () => post('queuePause');
+el('cancel-login').onclick = () => post('cancelLogin');
 el('restore-request').onclick = () => { flushDraft(); post('restoreRequest', { id: state.activeId, revision: state.revision, editVersion: inputRevision }); };
 el('recover-connect').onclick = () => post('reconnect'); el('reconnect').onclick = () => { el('menu').hidden = true; post('reconnect'); };
 function closeMenu(focus = false) { el('menu').hidden = true; el('more').setAttribute('aria-expanded', 'false'); if (focus) el('more').focus(); }

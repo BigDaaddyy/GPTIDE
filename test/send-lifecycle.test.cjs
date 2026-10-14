@@ -16,6 +16,11 @@ function fixture() {
   Object.assign(chat, { ready: Promise.resolve(), project: process.cwd(), projectKey: 'project', activeId: 'one', chats: [record], openChatIds: ['one'], messages: record.messages, attachments: [], threadId: 'thread', resumed: true, account: { type: 'chatgpt' }, model: 'fixture', effort: 'medium', busy: false, post: () => {}, save: () => true, view: { webview: { postMessage: () => {} } }, drafts: { set: () => {} } });
   return chat;
 }
+test('explicit focus waits for view activation and never posts into a closed project',async()=>{
+  const previous=vscode.commands;let finish;vscode.commands={executeCommand:method=>{assert.equal(method,'gptide.chat.focus');return new Promise(resolve=>{finish=resolve;});}};
+  try{const chat=fixture();let posts=0;chat.post=()=>posts++;const pending=chat.focusInput();await new Promise(resolve=>setImmediate(resolve));assert.equal(posts,0);assert.ok(chat.focusRequestId);chat.invalidated=true;finish();await pending;assert.equal(posts,0);}
+  finally{vscode.commands=previous;}
+});
 
 test('project login holds the task and tab lock until the matching account finishes refreshing', async () => {
   const { EventEmitter } = require('node:events'), bridge = new EventEmitter(), chat = fixture(); let requests = 0;

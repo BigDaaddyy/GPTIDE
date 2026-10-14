@@ -48,6 +48,7 @@ body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(
 
 /* Keep essential input and stop controls reachable when auxiliary content grows. */
 .footer-context{max-height:30dvh;overflow:auto;scrollbar-width:thin}
+.login-state{display:flex;align-items:center;gap:6px;padding:5px 3px;margin-bottom:5px;font-size:11px;color:var(--muted)}.login-state button{padding:4px 6px;border:1px solid var(--border);font-size:11px}
 .popup{max-width:calc(100vw - 16px);max-height:calc(100dvh - 60px);overflow:auto}
 .warning{max-height:min(96px,15dvh);overflow:auto;overflow-wrap:anywhere}
 .attachments{max-height:70px;overflow:auto}

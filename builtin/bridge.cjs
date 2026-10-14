@@ -72,6 +72,6 @@ class Bridge extends EventEmitter {
     for (const entry of this.pending.values()) { clearTimeout(entry.timer); entry.reject(error); }
     this.pending.clear(); if (this.child && !this.child.killed) this.child.kill(); this.emit('disconnected', error);
   }
-  dispose() { this.fail(new Error('Codex 连接已关闭')); }
+  dispose(error = new Error('Codex 连接已关闭')) { this.fail(error); }
 }
 module.exports = { Bridge, findCodex };

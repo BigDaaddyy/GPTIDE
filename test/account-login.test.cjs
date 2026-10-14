@@ -4,8 +4,8 @@ const bridges = []; let delayed = false;
 class FakeBridge extends EventEmitter {
   constructor() { super(); this.calls = []; this.disposals = 0; bridges.push(this); }
   start() { return delayed ? new Promise(resolve => { this.finishStart = resolve; }) : Promise.resolve(); }
-  call(method, params) { this.calls.push({ method, params }); return Promise.resolve({ type: 'chatgpt', loginId: 'fixture-login', authUrl: 'https://example.invalid/local-fixture' }); }
-  dispose() { this.disposals++; this.emit('disconnected'); }
+  call(method, params) { this.calls.push({ method, params }); return Promise.resolve(method==='account/login/cancel'?{status:'canceled'}:{ type: 'chatgpt', loginId: 'fixture-login', authUrl: 'https://example.invalid/local-fixture' }); }
+  dispose() { if(this.closed)return;this.closed=true;this.disposals++; this.emit('disconnected'); }
 }
 const original = Module.prototype.require; let login;
 try { Module.prototype.require = function(id) { return id === './bridge.cjs' ? { Bridge: FakeBridge, findCodex: () => 'unused' } : original.apply(this, arguments); }; login = require('../builtin/account.cjs').login; }
@@ -31,4 +31,9 @@ test('browser open failure disposes login and allows retry without stale lock', 
   const f = fixture(), start = bridges.length; f.vscode.env.openExternal = async () => false;
   try { await assert.rejects(login(f.vscode, f.context), /无法打开/); await assert.rejects(login(f.vscode, f.context), /无法打开/); assert.equal(bridges.length, start + 2); assert.equal(bridges[start].disposals, 1); }
   finally { f.dispose(); }
+});
+test('standalone account menu cancels its current flow and permits a fresh login',async()=>{
+  const f=fixture(),account=require('../builtin/account.cjs');
+  try{await login(f.vscode,f.context);const bridge=bridges.at(-1);assert.equal(account.canCancel(f.context),true);await account.cancel(f.context);assert.deepEqual(bridge.calls.at(-1),{method:'account/login/cancel',params:{loginId:'fixture-login'}});assert.equal(account.canCancel(f.context),false);assert.equal(bridge.disposals,1);await login(f.vscode,f.context);assert.notEqual(bridges.at(-1),bridge);}
+  finally{f.dispose();}
 });

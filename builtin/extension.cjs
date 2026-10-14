@@ -17,6 +17,11 @@ const exec = promisify(execFile);
 
 class Chat {
   actionLocked() { return !!(this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.loginPending); }
+  async focusInput() {
+    await this.ready; if (this.invalidated) return;
+    this.focusRequestId = crypto.randomUUID(); await vscode.commands.executeCommand('gptide.chat.focus');
+    if (!this.invalidated) this.post();
+  }
   constructor(context) {
     this.context = context; this.messages = []; this.chats = []; this.model = vscode.workspace.getConfiguration('gptide').get('model');
     this.preferences = preferences.values(vscode.workspace.getConfiguration('gptide'));
@@ -239,7 +244,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), operationLocked: this.actionLocked(), loginPending: !!this.loginPending, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), focusRequestId: this.focusRequestId, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, canCancelLogin: !!this.loginSession?.id && !this.loginSession.done && !this.loginSession.completing && !this.loginSession.canceling, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -488,7 +493,7 @@ class Chat {
     try {
       const bridge = await this.connect(); if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('当前状态已变化，请完成任务后重试');
       const session = new (require('./login-session.cjs').LoginSession)(bridge, {
-        open: url => vscode.env.openExternal(vscode.Uri.parse(url)), refresh: async () => { this.resumed = false; await this.refreshAccount(); },
+        open: url => vscode.env.openExternal(vscode.Uri.parse(url)), refresh: async () => { this.resumed = false; try { await this.refreshAccount(); } catch (error) { this.account = null; this.models = []; throw error; } },
         state: message => { if (!this.invalidated && this.loginSession === session) { this.status = message; this.post(); } },
         end: () => { if (this.loginSession === session) { this.loginSession = null; this.loginPending = false; if (!this.invalidated) this.post(); } }
       }); this.loginSession = session; await session.begin();
@@ -688,8 +693,10 @@ class Chat {
       if (msg.type !== 'ready') { await this.ready; if (this.invalidated) return; }
       try {
         if (msg.type === 'ready') this.post();
+        if (msg.type === 'focusHandled' && msg.id === this.focusRequestId) this.focusRequestId = undefined;
         if (msg.type === 'draft') { const saved = this.persistDraft(msg.id, msg.text); this.view?.webview.postMessage({ type: 'draftSaved', projectKey: this.projectKey, id: msg.id, sequence: msg.sequence, saved, history: history.entries(this.chats.filter(c => c.projectKey === this.projectKey), this.activeId) }); }
         if (msg.type === 'login') await this.login();
+        if (msg.type === 'cancelLogin') await this.loginSession?.cancel();
         if (msg.type === 'reconnect') await this.reconnect();
         if (msg.type === 'restoreRequest') await this.restoreRequest(msg.id, msg.revision, msg.editVersion);
         if (msg.type === 'send') await this.send(msg.text, msg.mode, msg.attach, typeof msg.clientSendId === 'string' && msg.clientSendId.length <= 160 ? msg.clientSendId : undefined);
@@ -758,8 +765,9 @@ function activate(context) {
     if (action) return vscode.commands.executeCommand('workbench.extensions.search', 'Remote SSH');
   }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.homeAccount', async () => {
-    const info = require('./account.cjs').localInfo();
-    const item = await vscode.window.showQuickPick([{ label: '登录 / 切换 ChatGPT 账户' }], { title: info.label });
+    const account = require('./account.cjs'), info = account.localInfo();
+    const item = await vscode.window.showQuickPick([{ label: '登录 / 切换 ChatGPT 账户', action: 'login' }, ...(account.canCancel(context, chat) ? [{ label: '取消等待登录', action: 'cancel' }] : [])], { title: info.label });
+    if (item?.action === 'cancel') return account.cancel(context, chat).catch(error => vscode.window.showErrorMessage(error.message));
     if (item) return vscode.commands.executeCommand('gptide.accountLogin');
   }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.accountInfo', () => require('./account.cjs').localInfo()));
@@ -769,7 +777,7 @@ function activate(context) {
   chat = new Chat(context); chat.settingsRefresh = settings.refresh; context.subscriptions.push(chat);
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration("gptide")) chat.post(); }));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('gptide.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }));
-  context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => vscode.commands.executeCommand('gptide.chat.focus')));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => chat.focusInput().catch(error => vscode.window.showErrorMessage(error.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.exportChat', () => chat.exportChat().catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.login', () => chat.login()));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy || chat.reviewBusy) return vscode.window.showInformationMessage('请先等待当前任务完成'); if (chat.storageBlocked) return vscode.commands.executeCommand('workbench.action.reloadWindow'); await chat.importCursor(); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
@@ -779,7 +787,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));
   for (const [command, kind] of [['gptide.attachDiagnostics', 'diagnostics'], ['gptide.attachGitDiff', 'git'], ['gptide.attachFolder', 'folder']]) context.subscriptions.push(vscode.commands.registerCommand(command, uri => chat.attachContext(kind, uri).catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.inlineEdit', () => chat.inlineEdit().catch(error => vscode.window.showErrorMessage(error.message))));
-  context.subscriptions.push(vscode.commands.registerCommand('gptide.newChat', async () => { await chat.ready; if (!chat.busy) { chat.newChat(); vscode.commands.executeCommand('gptide.chat.focus'); } }));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.newChat', async () => { await chat.ready; if (chat.actionLocked()) return vscode.window.showInformationMessage('请先完成当前任务或登录'); chat.newChat(); await chat.focusInput(); }));
   vscode.commands.executeCommand('gptide.chat.focus');
 }
 module.exports = { activate, Chat };
