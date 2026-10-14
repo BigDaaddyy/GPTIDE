@@ -112,6 +112,18 @@ test('preparing a send locks its conversation and ignores duplicate send', async
   finishConnect({ call: async method => { calls++; assert.equal(method, 'turn/start'); return { turn: { id: 'turn' } }; } });
   await pending; assert.equal(calls, 1); assert.equal(chat.messages.length, 1); assert.equal(chat.messages[0].text, 'submitted');
 });
+
+test('sending reads fixed project context fresh and preserves it after acknowledgment', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-fixed-send-'));
+  try {
+    const chat = fixture(); chat.project = root; fs.writeFileSync(path.join(root, 'a.js'), 'old code');
+    chat.fixedContext = new (require('../builtin/project-context.cjs').ProjectContext)(path.join(root, 'context.json'), root, 'project');
+    chat.fixedContext.save({ files: ['a.js'], excluded: [], rules: 'QA rules' }); fs.writeFileSync(path.join(root, 'a.js'), 'fresh code'); let payload;
+    chat.connect = async () => ({ call: async (method, params) => { assert.equal(method, 'turn/start'); payload = params; return { turn: { id: 'qa-fixed' } }; } });
+    await chat.send('request', 'ask', false); assert.ok(payload.input[0].text.includes('fresh code')); assert.ok(payload.input[0].text.includes('QA rules')); assert.ok(!payload.input[0].text.includes('old code'));
+    assert.deepEqual(chat.fixedContext.state.files, ['a.js']); assert.ok(chat.messages[0].attachments.includes('固定 · a.js'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('canceling preparation avoids any turn and keeps the draft', async () => {
   const chat = fixture(); let finishConnect, calls = 0;
   chat.connect = () => new Promise(resolve => { finishConnect = resolve; });

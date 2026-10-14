@@ -202,6 +202,8 @@ function render(s) {
   }
   if (!s.busy && s.mode) el('mode').value = previous.mode || s.mode;
   el('attachments').replaceChildren();
+  for (const label of (s.pinnedContext || []).slice(0, 3)) { const chip = make('button', 'file-chip', '⌖ ' + label); chip.title = '项目固定上下文 · ' + label; chip.onclick = () => post('settings'); el('attachments').append(chip); }
+  if (s.pinnedContext?.length > 3) { const chip = make('button', 'file-chip', '+' + (s.pinnedContext.length - 3) + ' 固定引用'); chip.onclick = () => post('settings'); el('attachments').append(chip); }
   for (const attachment of s.attachments || []) { const chip = make('span', 'file-chip', attachment.label), remove = make('button', '', '×'); remove.disabled = s.busy; remove.title = '移除引用'; remove.onclick = () => post('removeAttachment', { id: attachment.id }); chip.append(remove); el('attachments').append(chip); }
   const checkpoints = s.checkpoints || [], reviews = JSON.stringify([s.changes, checkpoints, s.activeCheckpointId, s.busy, s.reviewBusy]); if (reviews !== reviewSignature) {
     reviewSignature = reviews; el('review').hidden = !s.changes?.length && !checkpoints.length; el('review-count').textContent = `${s.changes?.length || 0} 个文件`; el('review-files').replaceChildren();
