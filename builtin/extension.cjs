@@ -16,11 +16,32 @@ const preferences = require('./preferences.cjs');
 const exec = promisify(execFile);
 
 class Chat {
+  async copyText(text,copyId) {
+    const view=this.view,owner=this.projectKey;
+    const reply=type=>{if(!this.invalidated&&this.projectKey===owner&&this.view===view)view?.webview.postMessage({type,projectKey:owner,copyId});};
+    try{await vscode.env.clipboard.writeText(text);reply('copied');}
+    catch(error){reply('copyFailed');throw error;}
+  }
   actionLocked() { return !!(this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.loginPending); }
   async focusInput() {
     await this.ready; if (this.invalidated) return;
     this.focusRequestId = crypto.randomUUID(); await vscode.commands.executeCommand('gptide.chat.focus');
     if (!this.invalidated) this.post();
+  }
+  codeContent(uri) { const [,owner,id]=uri.path.split('/');if(this.invalidated||owner!==this.projectKey||!this.codePreviews?.has(id))throw new Error('临时代码片段已过期，请重新打开');return this.codePreviews.get(id); }
+  async showCode(id,index,codeIndex,revision) {
+    if(this.invalidated||this.loadingScope||id!==this.activeId||revision!==this.streamRevision)throw new Error('对话已更新，请重新打开代码片段');
+    const chat=this.chats.find(value=>value.id===id&&value.projectKey===this.projectKey);
+    if(!chat||!Number.isSafeInteger(index)||index<0||!Number.isSafeInteger(codeIndex)||codeIndex<0||!chat.messages[index])throw new Error('代码片段不存在');
+    const block=require('./markdown.cjs').parseMarkdown(chat.messages[index].text||'').filter(value=>value.type==='code')[codeIndex];
+    if(!block)throw new Error('代码片段不存在');if(Buffer.byteLength(block.text)>512*1024)throw new Error('代码片段过大，请复制到编辑器查看');
+    const current=()=>!this.invalidated&&this.activeId===id&&this.streamRevision===revision;
+    const languages=await vscode.languages.getLanguages();if(!current())return;
+    const candidate=require('./code.cjs').codeLanguage(block.language),language=languages.includes(candidate)?candidate:'plaintext',key=crypto.randomUUID();
+    this.codePreviews||=new Map();this.codePreviews.set(key,block.text);while(this.codePreviews.size>20)this.codePreviews.delete(this.codePreviews.keys().next().value);
+    const uri=vscode.Uri.from({scheme:'gptide-code',path:`/${this.projectKey}/${key}/snippet`});
+    const document=await vscode.workspace.openTextDocument(uri);if(!current())return;
+    const formatted=await vscode.languages.setTextDocumentLanguage(document,language);if(current())await vscode.window.showTextDocument(formatted,{preview:true});
   }
   constructor(context) {
     this.context = context; this.messages = []; this.chats = []; this.model = vscode.workspace.getConfiguration('gptide').get('model');
@@ -687,13 +708,14 @@ class Chat {
     this.view = view; view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(this.context.extensionPath)] };
     const nonce = crypto.randomBytes(20).toString('hex');
     const source = name => fs.readFileSync(path.join(this.context.extensionPath, name), 'utf8');
-    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__FIND__', () => source('find.cjs')).replace('__ACTIONS__', () => source('quick-actions.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
+    view.webview.html = source('view.html').replace('__STYLE__', () => source('view.css')).replace('__MARKDOWN__', () => source('markdown.cjs')).replace('__CODE__', () => source('code.cjs')).replace('__FIND__', () => source('find.cjs')).replace('__ACTIONS__', () => source('quick-actions.cjs')).replace('__SCRIPT__', () => source('view.js')).replaceAll('__NONCE__', nonce).replaceAll('__PROJECT_KEY__', this.projectKey);
     view.webview.onDidReceiveMessage(async msg => {
       if (this.invalidated || msg.projectKey !== this.projectKey) return;
       if (msg.type !== 'ready') { await this.ready; if (this.invalidated) return; }
       try {
         if (msg.type === 'ready') this.post();
         if (msg.type === 'focusHandled' && msg.id === this.focusRequestId) this.focusRequestId = undefined;
+        if (msg.type === 'openCode') await this.showCode(msg.id,msg.index,msg.codeIndex,msg.revision);
         if (msg.type === 'draft') { const saved = this.persistDraft(msg.id, msg.text); this.view?.webview.postMessage({ type: 'draftSaved', projectKey: this.projectKey, id: msg.id, sequence: msg.sequence, saved, history: history.entries(this.chats.filter(c => c.projectKey === this.projectKey), this.activeId) }); }
         if (msg.type === 'login') await this.login();
         if (msg.type === 'cancelLogin') await this.loginSession?.cancel();
@@ -725,7 +747,7 @@ class Chat {
         if (msg.type === 'revert') await this.revert(msg.path);
         if (msg.type === 'redo') await this.revert(msg.path, true);
         if (msg.type === 'accept' && !this.actionLocked()) { const change = this.changes.find(c => c.path === msg.path); if (change) { this.changeStatus(change, 'accepted'); this.save(); this.post(); } }
-        if (msg.type === 'copy' && typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
+        if (msg.type === 'copy' && typeof msg.text === 'string') await this.copyText(msg.text,msg.copyId);
         if (msg.type === 'openLink' && /^https?:\/\//i.test(msg.url)) await vscode.env.openExternal(vscode.Uri.parse(msg.url));
         if (msg.type === 'settings') await vscode.commands.executeCommand('gptide.settings');
         if (msg.type === 'usage') await vscode.commands.executeCommand('gptide.usage');
@@ -740,6 +762,7 @@ class Chat {
     this.post();
   }
   invalidateProject() {
+    this.codePreviews?.clear();
     this.loginSession?.dispose(); this.loginPending = false;
     vscode.commands?.executeCommand?.('gptide.cancelInlineInput')?.catch(() => {});
     clearTimeout(this.queueTimer); this.queueDispatchToken = null;
@@ -782,6 +805,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.login', () => chat.login()));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy || chat.reviewBusy) return vscode.window.showInformationMessage('请先等待当前任务完成'); if (chat.storageBlocked) return vscode.commands.executeCommand('workbench.action.reloadWindow'); await chat.importCursor(); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.beforeContent(uri) }));
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-code', { provideTextDocumentContent: uri => chat.codeContent(uri) }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-checkpoint', { provideTextDocumentContent: uri => { const [owner, hash] = uri.path.split('/').filter(Boolean); if (owner !== chat.projectKey) throw new Error('检查点不属于当前项目'); if (hash === 'empty') return ''; if (!chat.checkpointStore) throw new Error('检查点存储不可用'); return chat.checkpointStore.get(hash); } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.cleanupCheckpoints', () => { try { chat.cleanupCheckpoints(); } catch (error) { vscode.window.showErrorMessage(error.message); } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));

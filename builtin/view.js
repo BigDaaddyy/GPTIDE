@@ -11,6 +11,7 @@ let handledFocusId;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
+const pendingCopies=new Map();let copySequence=0;
 let tabsSignature, messageAnchor = null, findPosition = 0, findHits = [], findQuery = '', findTimer, findChat, taskFilterSignature;
 const findCache = new Map();
 let quickRows = [], quickIndex = 0, quickSignature = '', quickDismissed;
@@ -28,18 +29,29 @@ function inline(node, text) {
   }
   node.append(document.createTextNode(text.slice(end)));
 }
-function content(node, text) {
-  for (const block of parseMarkdown(text)) {
-    if (block.type === 'code') {
-      const wrapper = make('div', 'code-block'), header = make('div', 'code-title'), copy = make('button', '', '复制');
-      copy.onclick = () => { post('copy', { text: block.text }); copy.textContent = '已复制'; setTimeout(() => copy.textContent = '复制', 1200); };
-      header.append(make('span', '', block.language || 'code'), copy); const pre = make('pre'); pre.append(make('code', '', block.text)); wrapper.append(header, pre); node.append(wrapper);
-    } else if (block.type === 'list') { const list = make(block.ordered ? 'ol' : 'ul'); for (const value of block.items) { const li = make('li'); inline(li, value); list.append(li); } node.append(list); }
-    else if (block.type === 'table') {
-      const wrapper = make('div', 'table-wrap'), table = make('table'), head = make('tr'); for (const cell of block.header) { const th = make('th'); inline(th, cell); head.append(th); } table.append(head);
-      for (const row of block.rows) { const tr = make('tr'); for (const cell of row) { const td = make('td'); inline(td, cell); tr.append(td); } table.append(tr); } wrapper.append(table); node.append(wrapper);
-    } else { const element = make(block.type === 'heading' ? 'h' + block.level : block.type === 'quote' ? 'blockquote' : block.type === 'rule' ? 'hr' : 'p'); if (block.text) inline(element, block.text); node.append(element); }
+function codeWidget(node,index) {
+  const wrapper=make('div','code-block'),header=make('div','code-title'),title=make('span'),copy=make('button','','复制'),open=make('button','','编辑器'),expand=make('button','','展开'),pre=make('pre'),code=make('code');
+  const widget={wrapper,title,copy,pre,code,expand,expanded:false};open.title='在临时只读编辑器打开';
+  open.onclick=()=>post('openCode',{id:state.activeId,index:Number(node.closest('.message').dataset.messageIndex),codeIndex:index,revision:state.revision});
+  copy.onclick=()=>{const id=sendPrefix+'-copy-'+(++copySequence);copy.disabled=true;copy.textContent='复制中';clearTimeout(widget.copyTimer);const timer=setTimeout(()=>{pendingCopies.delete(id);copy.disabled=false;copy.textContent='复制';copy.title='复制未确认，可重试';},5000);pendingCopies.set(id,{widget,timer});post('copy',{text:widget.block.text,copyId:id});};
+  expand.onclick=()=>{widget.expanded=!widget.expanded;updateCode(widget,widget.block);};
+  header.append(title,make('span','spacer',''),open,copy,expand);pre.append(code);wrapper.append(header,pre);return widget;
+}
+function updateCode(widget,block) {
+  if(widget.block?.text!==block.text||widget.block?.language!==block.language){widget.code.replaceChildren();for(const token of codeTokens(block.text,block.language))widget.code.append(token.kind==='plain'?document.createTextNode(token.text):make('span','code-'+token.kind,token.text));}
+  widget.block=block;widget.title.textContent=block.language||'code';const long=block.text.split('\n').length>24;widget.pre.classList.toggle('code-folded',long&&!widget.expanded);widget.expand.hidden=!long;widget.expand.textContent=widget.expanded?'折叠':'展开';widget.expand.setAttribute('aria-expanded',String(widget.expanded));
+}
+function content(node,text) {
+  const widgets=node.codeWidgets||(node.codeWidgets=new Map()),children=[];let codeIndex=0;
+  for(const block of parseMarkdown(text)) {
+    if(block.type==='code'){const index=codeIndex++;let widget=widgets.get(index);if(!widget){widget=codeWidget(node,index);widgets.set(index,widget);}updateCode(widget,block);children.push(widget.wrapper);}
+    else if(block.type==='list'){const list=make(block.ordered?'ol':'ul');for(const value of block.items){const li=make('li');inline(li,value);list.append(li);}children.push(list);}
+    else if(block.type==='table'){const wrapper=make('div','table-wrap'),table=make('table'),head=make('tr');for(const cell of block.header){const th=make('th');inline(th,cell);head.append(th);}table.append(head);for(const values of block.rows){const row=make('tr');for(const cell of values){const td=make('td');inline(td,cell);row.append(td);}table.append(row);}wrapper.append(table);children.push(wrapper);}
+    else{const element=make(block.type==='heading'?'h'+block.level:block.type==='quote'?'blockquote':block.type==='rule'?'hr':'p');if(block.text)inline(element,block.text);children.push(element);}
   }
+  for(const index of widgets.keys())if(index>=codeIndex)widgets.delete(index);
+  const keep=new Set(children);for(const child of [...node.childNodes])if(!keep.has(child))child.remove();
+  for(let i=children.length-1,next=null;i>=0;i--){const child=children[i];if(child.parentNode!==node||child.nextSibling!==next)node.insertBefore(child,next);next=child;}
 }
 function renderHistory() {
   const search = el('history-search').value.toLowerCase(); el('history-list').replaceChildren();
@@ -89,7 +101,7 @@ function renderMessages(s) {
     if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
-      row.body.replaceChildren(); content(row.body, message.text); row.signature = signature; row.message = message; continue;
+      content(row.body, message.text); row.signature = signature; row.message = message; continue;
     }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GptIDE');
     item.dataset.messageIndex = String(index);
@@ -291,7 +303,8 @@ function beginTabChange() { pendingTabChange = true; el('input').disabled = true
 function scheduleDraft() { clearTimeout(draftTimer); el('draft-state').textContent = el('input').value ? '草稿…' : ''; draftTimer = setTimeout(flushDraft, 650); }
 window.addEventListener('message', event => {
   const data = event.data; if (!data || data.projectKey !== projectKey || invalidated) return;
-  if (data.type === 'reset') { clearTimeout(draftTimer); invalidated = true; document.body.hidden = true; return; }
+  if (data.type === 'reset') { clearTimeout(draftTimer);for(const {widget,timer} of pendingCopies.values()){clearTimeout(timer);clearTimeout(widget.copyTimer);}pendingCopies.clear(); invalidated = true; document.body.hidden = true; return; }
+  if(data.type==='copied'||data.type==='copyFailed') {const pending=pendingCopies.get(data.copyId);if(!pending)return;pendingCopies.delete(data.copyId);clearTimeout(pending.timer);const widget=pending.widget;widget.copy.disabled=false;widget.copy.textContent=data.type==='copied'?'已复制':'重试复制';widget.copy.title=data.type==='copied'?'已复制完整代码':'复制失败，可重试';if(data.type==='copied')widget.copyTimer=setTimeout(()=>{widget.copy.textContent='复制';},1200);return;}
   if (data.type === 'tabChangePending') beginTabChange();
   if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope || !!state.storageBlocked; }
   if (data.type === 'state') render(data);

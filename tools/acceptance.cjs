@@ -8,6 +8,7 @@ const scenarios = [
   ['import', 'import-native-check.cjs'],
   ['settings', 'settings-context-native-check.cjs'], ['drafts', 'draft-ui-check.cjs'], ['branches', 'branch-native-check.cjs'],
   ['keyboard','keyboard-native-check.cjs'],
+  ['code','code-native-check.cjs'],
   ['queue', 'queue-native-check.cjs'], ['inline', 'inline-widget-native-check.cjs'], ['recovery', 'recovery-native-check.cjs'],
   ['checkpoints', 'checkpoint-ui-check.cjs'], ['menus-light', 'menu-audit.cjs', ['--after']], ['menus-dark', 'menu-audit.cjs', ['--after', '--dark']]
 ];
