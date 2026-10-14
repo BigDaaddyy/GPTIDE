@@ -46,7 +46,7 @@ function renderHistory() {
   if (!chats.length) el('history-list').append(make('div', 'history-empty', search ? '没有匹配的对话' : '这个项目还没有聊天记录'));
   for (const chat of chats) {
     const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.busy;
-    row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
+    row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.branch ? '分支' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
     row.onclick = () => { flushDraft(); if (chat.id !== state.activeId) beginTabChange(); post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
   }
 }
@@ -54,12 +54,13 @@ function renderMessages(s) {
   const chatKey = s.activeId || '__new__', switched = renderedChat !== chatKey;
   if (switched) { renderedChat = chatKey; visibleMessages = 100; messageAnchor = null; }
   const box = el('messages'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100, oldTop = box.scrollTop;
-  const nextLayout = JSON.stringify([chatKey, s.source, !s.messages.length]);
+  const nextLayout = JSON.stringify([chatKey, s.source, s.branch, !s.messages.length]);
   if (nextLayout !== layoutKey) { box.replaceChildren(); messageRows.clear(); layoutKey = nextLayout; }
   if (!s.messages.length) {
     el('scroll-bottom').hidden = true; return;
   }
   if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor · 导入记录'));
+  if (s.branch && !box.querySelector('.branch-source')) box.append(make('div', 'branch-source', `分支自 ${s.branch.name} · 第 ${s.branch.messageIndex + 1} 条消息`));
   const start = messageAnchor === null ? Math.max(0, s.messages.length - visibleMessages) : Math.max(0, messageAnchor - 40);
   const end = messageAnchor === null ? s.messages.length : Math.min(s.messages.length, start + 100);
   let more = box.querySelector('.load-older');
@@ -72,7 +73,7 @@ function renderMessages(s) {
   for (let index = start; index < end; index++) {
     const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
     const signature = JSON.stringify(message); let row = messageRows.get(key);
-    if (row) row.item.dataset.messageIndex = String(index);
+    if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
       row.body.replaceChildren(); content(row.body, message.text); row.signature = signature; row.message = message; continue;
@@ -81,9 +82,11 @@ function renderMessages(s) {
     item.dataset.messageIndex = String(index);
     if (message.mode) role.append(make('span', 'badge', message.mode));
     const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
+    const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.busy || s.reviewBusy || s.storageBlocked;
+    branch.onclick = () => { flushDraft(); beginTabChange(); post('branch', { id: state.activeId, index: Number(item.dataset.messageIndex), revision: state.revision }); }; role.append(branch);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    row = { item, body, signature, message }; messageRows.set(key, row);
+    row = { item, body, signature, message, branch }; messageRows.set(key, row);
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.

@@ -37,3 +37,7 @@ body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(
 .quick-action{display:flex;align-items:center;gap:8px;width:100%;min-height:30px;padding:5px 7px;text-align:left;font-size:11px;overflow:hidden}
 .quick-action code{font-family:var(--vscode-editor-font-family,monospace);font-size:10px;min-width:86px;color:var(--muted)}.quick-action span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quick-action[aria-selected="true"]{background:var(--vscode-list-hoverBackground,#eef0f5);color:var(--vscode-foreground)}
+
+.role .branch-message{opacity:0;font-size:14px;padding:0 2px;color:var(--muted)}.message:hover .branch-message,.branch-message:focus{opacity:1}.branch-message:disabled{opacity:0}.user .role .branch-message{font-size:12px}
+
+.branch-source{font-size:10px;color:var(--muted);padding:2px 0 8px;overflow-wrap:anywhere}

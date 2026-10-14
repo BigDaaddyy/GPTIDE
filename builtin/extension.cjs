@@ -140,6 +140,14 @@ class Chat {
     const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: '新对话', messages: [], tasks: [], changes: [], updatedAt: Date.now() };
     this.chats.unshift(chat); this.select(chat.id); this.save();
   }
+  branchChat(id, index, revision) {
+    if (this.busy || this.reviewBusy || this.inlineBusy || this.invalidated || this.storageBlocked || id !== this.activeId || revision !== this.streamRevision) return false;
+    const source = this.chats.find(chat => chat.id === id && chat.projectKey === this.projectKey);
+    if (!source || !Number.isSafeInteger(index) || index < 0 || index >= source.messages.length) return false;
+    const chat = { ...require('./conversation-branch.cjs').create(source, index, this.projectKey), id: crypto.randomUUID() };
+    this.view?.webview.postMessage({ type: 'tabChangePending', projectKey: this.projectKey });
+    this.chats.unshift(chat); this.select(chat.id); this.status = '已创建分支 · 首次发送时建立独立会话'; this.save(); this.post(); return true;
+  }
   closeTab(id, draft) {
     if (this.busy || this.reviewBusy || !this.openChatIds.includes(id)) return;
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (chat && typeof draft === 'string') this.persistDraft(id, draft);
@@ -177,7 +185,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -430,6 +438,15 @@ class Chat {
     try {
       let importedContext = '';
       const selected = this.chats.find(c => c.id === this.activeId);
+      if (selected?.backgroundPending) {
+        const transcript = selected.messages.slice(0, selected.backgroundCount).map(m => `[${m.role}]\n${m.text}`).join('\n\n');
+        const limit = preferences.values(vscode.workspace.getConfiguration('gptide')).importLimit;
+        if (transcript.length > limit) {
+          const answer = await vscode.window.showWarningMessage(`历史摘录较长，将发送最近 ${limit.toLocaleString()} 字符作为背景，完整记录仍可查看。`, { modal: true }, '继续');
+          check(); if (answer !== '继续') { this.busy = false; this.status = '已取消发送'; this.post(); return; }
+        }
+        importedContext = '以下是已有对话的历史摘录，仅作为项目背景。请以当前请求为准。\n' + transcript.slice(-limit) + '\n\n当前请求：\n';
+      }
       if (!selected || selected.source === 'cursor') {
         if (selected) {
           const transcript = selected.messages.map(m => `[${m.role}]\n${m.text}`).join('\n\n');
@@ -440,7 +457,7 @@ class Chat {
           }
           importedContext = '以下是从 Cursor 导入的历史对话，仅作为项目背景。请以用户当前请求为准。\n' + transcript.slice(-importLimit) + '\n\n当前请求：\n';
         }
-        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, draftVersion: selected?.draftVersion || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], updatedAt: Date.now() };
+        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, draftVersion: selected?.draftVersion || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], backgroundPending: !!selected, backgroundCount: selected?.messages.length || 0, updatedAt: Date.now() };
         this.chats.unshift(chat); if (!this.openChatIds.includes(chat.id)) this.openChatIds.push(chat.id); this.activeId = chat.id; this.messages = chat.messages; this.threadId = null; this.resumed = false;
       }
       const named = this.chats.find(c => c.id === this.activeId); if (named?.name === '新对话' && !named.messages.length) named.name = text.slice(0, 40);
@@ -484,6 +501,8 @@ class Chat {
     const pending = this.pendingSubmission;
     if (!pending || pending.epoch !== epoch || this.sendEpoch !== epoch || this.invalidated) return;
     this.pendingSubmission = null;
+    const background = this.chats.find(chat => chat.id === pending.chatId && chat.projectKey === this.projectKey);
+    if (background?.backgroundPending) { background.backgroundPending = false; this.save(); }
     for (const id of pending.ids) { const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (chat?.draft === pending.draftText && (chat.draftVersion || 0) === pending.draftVersion) this.persistDraft(id, ''); }
     if (this.activeId === pending.chatId) this.attachments = this.attachments.filter(a => !pending.attachmentIds.has(a.id));
     else if (this.chatAttachments?.has(pending.chatId)) this.chatAttachments.set(pending.chatId, this.chatAttachments.get(pending.chatId).filter(a => !pending.attachmentIds.has(a.id)));
@@ -576,6 +595,7 @@ class Chat {
         if (msg.type === 'stop' && this.busy) { this.cancelPendingSend = true; this.status = '正在停止'; this.post(); if (this.turnId && this.bridge) await this.bridge.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }); else if (!this.bridge) this.pendingBridge?.dispose(); }
         if (msg.type === 'select') { if (!this.busy && this.select(msg.id)) this.save(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'new') { if (!this.busy) this.newChat(); else this.post(); }
+        if (msg.type === 'branch') { if (!this.branchChat(msg.id, msg.index, msg.revision)) { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'closeTab' && !this.busy) this.closeTab(msg.id, msg.draft);
         if (msg.type === 'model' && !this.busy && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); if (!model.supportedReasoningEfforts.some(e => e.reasoningEffort === this.effort)) this.effort = model.defaultReasoningEffort; this.save(); this.post(); }
         if (msg.type === 'effort' && !this.busy && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }

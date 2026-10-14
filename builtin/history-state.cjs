@@ -9,6 +9,11 @@ function chats(value) {
     if (!object(chat) || !string(chat.id) || !chat.id || seen.has(chat.id)) invalid('对话标识'); seen.add(chat.id);
     for (const field of ['projectKey', 'threadId', 'name', 'draft', 'source', 'activeCheckpointId']) optional(chat, field, string);
     optional(chat, 'draftVersion', value => Number.isSafeInteger(value) && value >= 0);
+    optional(chat, 'backgroundPending', value => typeof value === 'boolean');
+    optional(chat, 'backgroundCount', value => Number.isSafeInteger(value) && value >= 0 && value <= (chat.messages?.length || 0));
+    if (chat.backgroundPending && !Number.isSafeInteger(chat.backgroundCount)) invalid('背景消息数量');
+    optional(chat, 'branch', value => object(value) && string(value.id) && string(value.name) && Number.isSafeInteger(value.messageIndex) && value.messageIndex >= 0 && value.messageIndex < (chat.messages?.length || 0));
+    if (chat.branch && chat.backgroundCount !== chat.branch.messageIndex + 1) invalid('分支背景范围');
     optional(chat, 'messages', list => Array.isArray(list) && list.every(message => object(message) && (message.text === undefined || string(message.text)) && (message.role === undefined || string(message.role)) && (message.attachments === undefined || strings(message.attachments))));
     optional(chat, 'tasks', list => Array.isArray(list) && list.every(task => object(task) && (task.files === undefined || strings(task.files)) && ['id', 'turnId', 'kind', 'title', 'status', 'output'].every(field => task[field] === undefined || string(task[field]))));
     optional(chat, 'changes', list => Array.isArray(list) && list.every(change => object(change) && ['path', 'relative', 'status'].every(field => change[field] === undefined || string(change[field])) && ['before', 'after'].every(field => change[field] === undefined || change[field] === null || string(change[field]))));

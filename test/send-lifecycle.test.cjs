@@ -112,6 +112,26 @@ test('preparing a send locks its conversation and ignores duplicate send', async
   finishConnect({ call: async method => { calls++; assert.equal(method, 'turn/start'); return { turn: { id: 'turn' } }; } });
   await pending; assert.equal(calls, 1); assert.equal(chat.messages.length, 1); assert.equal(chat.messages[0].text, 'submitted');
 });
+test('branch starts an independent thread, sends only prefix background once and preserves origin', async () => {
+  const chat = fixture(); chat.streamRevision = 7; chat.chatAttachments = new Map(); chat.chats[0].messages.push({ role: 'user', text: 'prefix' }, { role: 'assistant', text: 'answer' }, { role: 'user', text: 'later' });
+  const origin = chat.chats[0]; assert.equal(chat.branchChat('one', 1, 6), false); assert.equal(chat.branchChat('one', 1, 7), true); const branch = chat.chats[0]; assert.notEqual(branch.id, 'one'); assert.equal(chat.threadId, undefined); assert.equal(origin.messages.length, 3);
+  const calls = []; chat.connect = async () => ({ call: async (method, params) => { calls.push({ method, params }); return method === 'thread/start' ? { thread: { id: 'independent' } } : { turn: { id: 'branch-turn' } }; } });
+  await chat.send('try alternative', 'ask', false); assert.equal(calls[0].method, 'thread/start'); const input = calls[1].params.input[0].text; assert.ok(input.includes('prefix')); assert.ok(input.includes('answer')); assert.ok(!input.includes('later')); assert.equal(branch.backgroundPending, false);
+  chat.busy = false; await chat.send('next request', 'ask', false); assert.ok(!calls.at(-1).params.input[0].text.includes('prefix')); assert.equal(origin.threadId, undefined); assert.equal(origin.draft, 'submitted');
+});
+test('unacknowledged branch retains original background for a retry without copying failed requests into it', async () => {
+  const chat = fixture(); chat.streamRevision = 1; chat.chatAttachments = new Map(); chat.chats[0].messages.push({ role: 'user', text: 'seed' }); chat.branchChat('one', 0, 1);
+  const branch = chat.chats[0]; let fail = true, input;
+  chat.connect = async () => ({ call: async (method, params) => { if (method === 'thread/start') return { thread: { id: 'retry' } }; if (fail) throw new Error('QA failed before start'); input = params.input[0].text; return { turn: { id: 'ok' } }; } });
+  await assert.rejects(chat.send('failed request', 'ask', false), /QA failed/); assert.equal(branch.backgroundPending, true);
+  fail = false; await chat.send('retry request', 'ask', false); assert.ok(input.includes('seed')); assert.ok(!input.includes('failed request')); assert.equal(branch.backgroundPending, false);
+});
+test('Cursor migration retry retains imported background after its first turn fails', async () => {
+  const chat = fixture(); chat.chats[0].source = 'cursor'; chat.chats[0].messages = [{ role: 'user', text: 'Cursor seed' }]; let failed = true, input;
+  chat.connect = async () => ({ call: async (method, params) => { if (method === 'thread/start') return { thread: { id: 'cursor-copy' } }; if (failed) throw new Error('QA first failure'); input = params.input[0].text; return { turn: { id: 'ok' } }; } });
+  await assert.rejects(chat.send('first try', 'ask', false), /QA first failure/); const copy = chat.chats[0]; assert.equal(copy.source, 'gptide'); assert.equal(copy.backgroundPending, true);
+  failed = false; await chat.send('retry', 'ask', false); assert.ok(input.includes('Cursor seed')); assert.ok(!input.includes('first try')); assert.equal(copy.backgroundPending, false);
+});
 
 test('sending reads fixed project context fresh and preserves it after acknowledgment', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-fixed-send-'));

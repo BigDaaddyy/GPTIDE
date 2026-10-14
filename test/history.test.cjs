@@ -8,4 +8,5 @@ test('history excludes empty tabs and groups identical conversations without del
   assert.equal(entries(chats, 'a')[0].id, 'a'); assert.equal(chats.length, 3);
   assert.equal(entries([{ id: 'draft', messages: [], draft: 'unfinished code task' }])[0].hasDraft, true);
   assert.equal(entries([a, { ...b, tasks: [{ kind: 'command', output: 'different result' }] }]).length, 2);
+  assert.equal(entries([{ ...a, branch: { id: 'origin' } }, { ...b, branch: { id: 'origin' } }]).length, 2);
 });
