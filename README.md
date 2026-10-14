@@ -58,7 +58,7 @@ GptIDE 历史保存时保留 `.bak` 上一份备份；主文件损坏时尝试�
 
 启动或打开项目后，按完整目录路径匹配 `%APPDATA%/Cursor/User/workspaceStorage`，从 SQLite 快照读取 composer 和 bubble 数据，保留原文件。首次打开默认显示最近的一条；以后优先恢复 GptIDE 上次的对话。刷新可重新读取 Cursor 最近进度。
 
-Cursor 对话只能作为上下文迁移，不能恢复 Cursor 内部代理状态、未完成工具调用、检查点或隐藏的推理内容。首次在导入对话发送消息时，创建新的 Codex 对话；过长历史会提示并发送最近约 18 万字符，全部原文仍可查看。当前支持本机默认用户目录和显式自定义目录，多根工作区的项目根由首个打开的文件夹决定。
+Cursor 对话只能作为上下文迁移，不能恢复 Cursor 内部代理状态、未完成工具调用、检查点或隐藏的推理内容。首次在导入对话发送消息时，创建新的 Codex 对话；过长历史会提示并发送最近约 18 万字符，全部原文仍可查看。支持本机默认用户目录和显式自定义目录；仅绑定单根项目，不导入多根共享工作区的历史。
 
 ## 导入 VS Code 设置和插件（0.9）
 
@@ -104,7 +104,11 @@ Agent 请求补充信息时使用原生选项或输入框；支持自定义选�
 
 `npm run check`、`npm test`、`npm run build`。`app/` 包含完整 VSCodium 运行环境；`builtin/` 是内置聊天源码；`tools/` 是打包、启动和导入程序；`data/` 为本机编辑器设置及项目聊天。源码不包含登录凭据，Codex 自行管理 ChatGPT 登录。
 
+1.0 验收范围见 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。`npm run acceptance` 在独立测试 Profile 和临时项目运行离线界面验收；`npm run acceptance -- --web` 只检查聊天布局、焦点和交互，`--native` 检查完整编辑器。需要开发测试环境中提供 Playwright；已有安装可通过 `GPTIDE_PLAYWRIGHT_MODULE` 指定完整模块路径，浏览器路径可通过 `GPTIDE_CHROMIUM` 指定。报告和截图位于被 Git 忽略的 `downloads/acceptance/`，测试不会连接模型。源码测试不依赖 Playwright。
+
 运行要求：Windows x64，本机有 Codex CLI / Codex 桌面应用。自动发现 `%LOCALAPPDATA%/OpenAI/Codex/bin/*/codex.exe`，也可以在设置里填写 `gptide.codexPath`。
+
+0.27 起启动器为最近项目等原生共享状态指定 `data/shared/`，与其他编辑器和测试 Profile 隔离；原聊天、草稿和检查点继续使用原来的项目数据目录。第一次使用独立共享目录时，最近项目列表会从之后打开的项目开始积累。
 
 底座来源：https://github.com/VSCodium/vscodium/releases/tag/1.135.06055
 

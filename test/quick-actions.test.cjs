@@ -11,6 +11,7 @@ test('busy and blocked states hide changes while retaining useful read-only acti
   const busy = matchingActions(actionQuery('/'), { busy: true }); assert.ok(busy.some(action => action.id === 'usage')); assert.ok(!busy.some(action => action.id === 'new' || action.mode));
   assert.deepEqual(matchingActions(actionQuery('/'), { storageBlocked: true }), []);
   assert.deepEqual(matchingActions(actionQuery('/'), { reviewBusy: true }), []);
+  for (const state of [{ loginPending: true }, { inlineBusy: true }, { operationLocked: true }]) { const actions = matchingActions(actionQuery('/'), state); assert.ok(actions.some(action => action.id === 'usage')); assert.ok(!actions.some(action => action.idle)); }
 });
 test('known mode arguments preserve code and unknown or argument-bearing utility text remains literal', () => {
   const parsed = commandAction('/ask\nExplain\nconst x = 1;'); assert.equal(parsed.action.mode, 'ask'); assert.equal(parsed.remainder, 'Explain\nconst x = 1;');

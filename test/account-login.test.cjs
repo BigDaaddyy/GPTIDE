@@ -4,7 +4,7 @@ const bridges = []; let delayed = false;
 class FakeBridge extends EventEmitter {
   constructor() { super(); this.calls = []; this.disposals = 0; bridges.push(this); }
   start() { return delayed ? new Promise(resolve => { this.finishStart = resolve; }) : Promise.resolve(); }
-  call(method, params) { this.calls.push({ method, params }); return Promise.resolve({ authUrl: 'https://example.invalid/local-fixture' }); }
+  call(method, params) { this.calls.push({ method, params }); return Promise.resolve({ type: 'chatgpt', loginId: 'fixture-login', authUrl: 'https://example.invalid/local-fixture' }); }
   dispose() { this.disposals++; this.emit('disconnected'); }
 }
 const original = Module.prototype.require; let login;
@@ -18,7 +18,7 @@ function fixture() {
 test('standalone login keeps one pending flow and releases it after completion', async () => {
   const f = fixture(), start = bridges.length;
   try { await login(f.vscode, f.context); await login(f.vscode, f.context); assert.equal(bridges.length, start + 1); assert.equal(f.opened.length, 1); assert.ok(f.messages.includes('请完成已有的 ChatGPT 登录'));
-    bridges[start].emit('notification', { method: 'account/login/completed', params: { success: true } }); assert.equal(bridges[start].disposals, 1);
+    bridges[start].emit('notification', { method: 'account/login/completed', params: { loginId: 'fixture-login', success: true } }); await new Promise(resolve => setImmediate(resolve)); assert.equal(bridges[start].disposals, 1);
     await login(f.vscode, f.context); assert.equal(bridges.length, start + 2);
   } finally { f.dispose(); }
 });

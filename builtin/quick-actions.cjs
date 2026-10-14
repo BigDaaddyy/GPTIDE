@@ -24,7 +24,7 @@ function actionQuery(text, caret = text.length, end = caret) {
 }
 function matchingActions(query, state = {}) {
   if (!query || state.loadingScope || state.storageBlocked || state.reviewBusy) return [];
-  return QUICK_ACTIONS.filter(action => (query.kind !== 'context' || action.context) && action.id.startsWith(query.query) && (!action.idle || !state.busy && !state.pendingSend));
+  return QUICK_ACTIONS.filter(action => (query.kind !== 'context' || action.context) && action.id.startsWith(query.query) && (!action.idle || !state.busy && !state.pendingSend && !state.operationLocked && !state.inlineBusy && !state.loginPending));
 }
 function commandAction(text) {
   const match = /^\/(\w+)(?:\s+([\s\S]*))?$/.exec(text.trim()); if (!match) return null;

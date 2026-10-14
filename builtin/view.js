@@ -45,20 +45,20 @@ function renderHistory() {
   const chats = [...(state.history || [])].filter(c => c.name.toLowerCase().includes(search)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   if (!chats.length) el('history-list').append(make('div', 'history-empty', search ? '没有匹配的对话' : '这个项目还没有聊天记录'));
   for (const chat of chats) {
-    const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.busy;
+    const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.operationLocked || state.busy;
     row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.branch ? '分支' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
     row.onclick = () => { flushDraft(); if (chat.id !== state.activeId) beginTabChange(); post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
   }
 }
 function renderQueue(s) {
   const queue = s.queue || []; el('queue-panel').hidden = !queue.length; el('queue-count').textContent = queue.length;
-  el('queue-status').textContent = s.queuePaused ? '已暂停' : '本轮完成后继续'; el('queue-pause').textContent = s.queuePaused ? '继续队列' : '暂停队列'; el('queue-pause').disabled = !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked;
+  el('queue-status').textContent = s.queuePaused ? '已暂停' : '本轮完成后继续'; el('queue-pause').textContent = s.queuePaused ? '继续队列' : '暂停队列'; el('queue-pause').disabled = !!s.loginPending || !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked;
   el('queue-list').replaceChildren();
   for (const [index, item] of queue.entries()) {
     const row = make('div', 'queue-row'), text = make('span', 'queue-text', item.text.slice(0, 160)); text.title = item.text.slice(0, 1000); row.append(make('span', 'badge', item.mode), text);
     if (item.status !== 'pending') { const status = make('span', 'queue-item-status', item.status === 'starting' ? '发送中' : '未确认'); status.title = item.error || ''; row.append(status); }
     const actions = [['编辑','queueEdit'],['↑','queueMove',-1],['↓','queueMove',1],['×','queueRemove']]; if (item.status === 'failed') actions.unshift(['重试','queueRetry']);
-    for (const [label, type, direction] of actions) { const button = make('button', 'text-button', label); button.title = type === 'queueRetry' ? '检查对话后重试，避免重复执行' : label; button.disabled = s.storageBlocked || item.status === 'starting' || direction === -1 && !index || direction === 1 && index === queue.length - 1; button.onclick = () => post(type, { id: item.id, direction }); row.append(button); }
+    for (const [label, type, direction] of actions) { const button = make('button', 'text-button', label); button.title = type === 'queueRetry' ? '检查对话后重试，避免重复执行' : label; button.disabled = s.loginPending || s.inlineBusy || s.reviewBusy || s.storageBlocked || item.status === 'starting' || direction === -1 && !index || direction === 1 && index === queue.length - 1; button.onclick = () => post(type, { id: item.id, direction }); row.append(button); }
     el('queue-list').append(row);
   }
 }
@@ -85,7 +85,7 @@ function renderMessages(s) {
   for (let index = start; index < end; index++) {
     const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
     const signature = JSON.stringify(message); let row = messageRows.get(key);
-    if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.busy || s.reviewBusy || s.storageBlocked; }
+    if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
       row.body.replaceChildren(); content(row.body, message.text); row.signature = signature; row.message = message; continue;
@@ -94,7 +94,7 @@ function renderMessages(s) {
     item.dataset.messageIndex = String(index);
     if (message.mode) role.append(make('span', 'badge', message.mode));
     const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
-    const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.busy || s.reviewBusy || s.storageBlocked;
+    const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked;
     branch.onclick = () => { flushDraft(); beginTabChange(); post('branch', { id: state.activeId, index: Number(item.dataset.messageIndex), revision: state.revision }); }; role.append(branch);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
@@ -169,15 +169,15 @@ function renderTasks(s) {
 }
 function render(s) {
   if (s.busy && !s.loadingScope && !pendingQueue) pendingSend = false;
-  const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.reviewBusy, s.chats.map(c => [c.id, c.name])]);
+  const tabs = JSON.stringify([s.openChatIds, s.activeId, s.operationLocked, s.busy, s.reviewBusy, s.chats.map(c => [c.id, c.name])]);
   if (tabs !== tabsSignature) {
     tabsSignature = tabs; el('chat-tabs').replaceChildren();
     for (const id of s.openChatIds || []) {
       const chat = s.chats.find(c => c.id === id); if (!chat) continue;
       const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
       const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
-      button.disabled = s.busy || s.reviewBusy; button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
-      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.busy || s.reviewBusy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
+      button.disabled = s.operationLocked || s.busy || s.reviewBusy; button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
+      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.operationLocked || s.busy || s.reviewBusy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
     }
   }
   const nextKey = s.activeId || '__new__';
@@ -201,27 +201,32 @@ function render(s) {
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
   el('connection').classList.toggle('connected', ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type)); el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
-  el('login').textContent = s.account?.type === 'chatgpt' ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
+  el('login').textContent = s.loginPending ? '等待 ChatGPT 登录…' : ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type) ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
+  el('login').disabled = !!s.operationLocked;
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
-  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
+  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.operationLocked || s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
-  el('send').disabled = !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
+  el('send').disabled = !!s.loginPending || !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
+  el('send').setAttribute('aria-label', s.busy ? '停止生成' : '发送消息');
   el('recovery').hidden = s.busy || s.inlineBusy || !['failed', 'interrupted', 'unknown'].includes(s.lastOutcome);
   el('recovery-label').textContent = s.lastOutcome === 'unknown' ? '上次结果未确认' : s.lastOutcome === 'interrupted' ? '任务已停止' : '任务未完成';
   el('restore-request').disabled = !s.canRestore || !!el('input').value.trim() || s.storageBlocked; el('restore-request').title = '只取回草稿，不发送；当前草稿需为空';
-  el('recover-connect').disabled = !!s.reviewBusy || !!s.storageBlocked;
+  el('recover-connect').disabled = !!s.operationLocked || !!s.reviewBusy || !!s.storageBlocked;
   el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
   el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
   renderQueue(s);
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
-    optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));
+    optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.model ? '默认 ' + s.model.replace(/^gpt-/i, '').replaceAll('-', ' ') : '发送时加载模型', s.model || ''));
     for (const m of s.models) el('model').add(new Option((m.displayName || m.model).replace('GPT-', '').replaceAll('-', ' '), m.model)); el('model').value = s.model;
     el('effort').replaceChildren(); const model = s.models.find(m => m.model === s.model), names = { minimal: '最轻', low: '轻量', medium: '均衡', high: '深入', xhigh: '更深入', max: 'Max', ultra: 'Ultra' };
     for (const e of model?.supportedReasoningEfforts || []) el('effort').add(new Option(names[e.reasoningEffort] || e.reasoningEffort, e.reasoningEffort)); el('effort').value = s.effort;
+    if (!el('effort').options.length) { el('effort').add(new Option(names[s.effort] || '默认', s.effort || '')); el('effort').value = s.effort || ''; }
   }
+  el('model').disabled ||= !s.models.length; el('model').title = s.models.length ? '选择模型' : '默认模型；连接后确认可用性';
+  el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
   if (!s.busy && s.mode) el('mode').value = previous.mode || s.mode;
   el('attachments').replaceChildren();
   for (const label of (s.pinnedContext || []).slice(0, 3)) { const chip = make('button', 'file-chip', '⌖ ' + label); chip.title = '项目固定上下文 · ' + label; chip.onclick = () => post('settings'); el('attachments').append(chip); }
@@ -232,11 +237,11 @@ function render(s) {
     el('checkpoint-select').replaceChildren();
     if (!s.activeCheckpointId && s.changes?.length) el('checkpoint-select').add(new Option('当前改动', 'current'));
     for (const checkpoint of [...checkpoints].reverse()) el('checkpoint-select').add(new Option(`${checkpoint.legacy ? '旧版记录' : '第 ' + checkpoint.turn + ' 轮'} · ${checkpoint.count} 文件${checkpoint.limited ? '（部分）' : ''}`, checkpoint.id));
-    el('checkpoint-select').value = s.activeCheckpointId || 'current'; el('checkpoint-select').disabled = s.busy || s.reviewBusy;
+    el('checkpoint-select').value = s.activeCheckpointId || 'current'; el('checkpoint-select').disabled = s.operationLocked || s.busy || s.reviewBusy;
     for (const change of s.changes || []) { const row = make('div', 'review-row'), file = make('button', 'review-path', change.relative); file.title = '查看修改差异'; file.onclick = () => post('diff', { path: change.path }); row.append(file);
       const actions = change.status === 'pending' ? [['保留', 'accept'], ['撤销', 'revert']] : change.status === 'accepted' ? [['撤销', 'revert']] : [['重做', 'redo']];
       if (change.status !== 'pending') row.append(make('span', 'review-status', change.status === 'accepted' ? '已保留' : '已撤销'));
-      for (const [label, type] of actions) { const button = make('button', 'text-button', label); button.disabled = s.busy || s.reviewBusy; button.onclick = () => post(type, { path: change.path }); row.append(button); }
+      for (const [label, type] of actions) { const button = make('button', 'text-button', label); button.disabled = s.operationLocked || s.busy || s.reviewBusy; button.onclick = () => post(type, { path: change.path }); row.append(button); }
       const current = make('button', 'text-button', '当前'); current.title = '此轮修改后与当前文件比较'; current.onclick = () => post('diffCurrent', { path: change.path }); row.append(current); el('review-files').append(row);
     }
   }
@@ -304,9 +309,9 @@ window.addEventListener('message', event => {
   }
   if (['sent','queued'].includes(data.type) && (data.clientSendId === undefined || data.clientSendId === submittedSendId)) {
     if ((!data.id || data.id === draftKey) && inputRevision === submittedInputRevision && el('input').value === submittedDraft) el('input').value = '';
-    pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; resizeInput(); flushDraft();
+    pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked; resizeInput(); flushDraft();
   }
-  if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; }
+  if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked; }
 });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { inputRevision++; quickDismissed = undefined; resizeInput(); scheduleDraft(); updateQuickActions(); });
@@ -337,8 +342,13 @@ el('enqueue').onclick = () => {
 el('queue-pause').onclick = () => post('queuePause');
 el('restore-request').onclick = () => { flushDraft(); post('restoreRequest', { id: state.activeId, revision: state.revision, editVersion: inputRevision }); };
 el('recover-connect').onclick = () => post('reconnect'); el('reconnect').onclick = () => { el('menu').hidden = true; post('reconnect'); };
-el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
-el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
+function closeMenu(focus = false) { el('menu').hidden = true; el('more').setAttribute('aria-expanded', 'false'); if (focus) el('more').focus(); }
+function closeHistory() { el('history-panel').hidden = true; el('history').setAttribute('aria-expanded', 'false'); el('history').focus(); }
+el('more').setAttribute('aria-controls', 'menu'); el('more').setAttribute('aria-expanded', 'false');
+el('history').setAttribute('aria-controls', 'history-panel'); el('history').setAttribute('aria-expanded', 'false');
+el('more').onclick = () => { const open = el('menu').hidden; closeHistory(); el('menu').hidden = !open; el('more').setAttribute('aria-expanded', String(open)); if (open) el('menu').querySelector('button:not(:disabled)')?.focus(); else el('more').focus(); };
+el('history').onclick = () => { const open = el('history-panel').hidden; closeMenu(); el('history-panel').hidden = !open; el('history').setAttribute('aria-expanded', String(open)); renderHistory(); if (open) el('history-search').focus(); else el('history').focus(); };
+el('menu').addEventListener('keydown', e => { if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return; e.preventDefault(); const buttons = [...el('menu').querySelectorAll('button:not(:disabled)')], index = buttons.indexOf(document.activeElement); const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length; buttons[next]?.focus(); });
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };
 el('find-query').oninput = () => { clearTimeout(findTimer); findTimer = setTimeout(() => updateFind(true), 120); };
 el('find-query').onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); moveFind(e.shiftKey ? -1 : 1); } };
@@ -347,15 +357,15 @@ el('task-filter').onchange = () => renderTasks(state);
 el('task-failures').onclick = () => { el('task-failures').setAttribute('aria-pressed', String(el('task-failures').getAttribute('aria-pressed') !== 'true')); renderTasks(state); };
 el('task-copy').onclick = () => post('copyTasks', { ids: [...taskRows.entries()].filter(([, row]) => !row.node.hidden).map(([id]) => id) });
 el('checkpoint-select').onchange = () => { if (el('checkpoint-select').value !== 'current') post('checkpoint', { id: el('checkpoint-select').value }); };
-el('close-history').onclick = () => el('history-panel').hidden = true; el('history-search').oninput = renderHistory;
+el('close-history').onclick = closeHistory; el('history-search').oninput = renderHistory;
 for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
-document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { el('menu').hidden = true; el('history-panel').hidden = true; if (!el('find-bar').hidden) closeFind(); } });
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
 document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
 el('chat-tabs').addEventListener('keydown', e => {
-  if (state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
+  if (state.operationLocked || state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
   const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;
   if (e.key === 'ArrowRight') next = ids[(index + 1) % ids.length];
   if (e.key === 'ArrowLeft') next = ids[(index + ids.length - 1) % ids.length];

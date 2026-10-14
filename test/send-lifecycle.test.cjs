@@ -16,6 +16,36 @@ function fixture() {
   Object.assign(chat, { ready: Promise.resolve(), project: process.cwd(), projectKey: 'project', activeId: 'one', chats: [record], openChatIds: ['one'], messages: record.messages, attachments: [], threadId: 'thread', resumed: true, account: { type: 'chatgpt' }, model: 'fixture', effort: 'medium', busy: false, post: () => {}, save: () => true, view: { webview: { postMessage: () => {} } }, drafts: { set: () => {} } });
   return chat;
 }
+
+test('project login holds the task and tab lock until the matching account finishes refreshing', async () => {
+  const { EventEmitter } = require('node:events'), bridge = new EventEmitter(), chat = fixture(); let requests = 0;
+  bridge.call = async () => { requests++; return { type: 'chatgpt', loginId: 'project-login', authUrl: 'https://example.invalid/fixture' }; };
+  chat.connect = async () => bridge; chat.refreshAccount = async () => {}; const oldEnv = vscode.env, oldUri = vscode.Uri;
+  vscode.env = { openExternal: async () => true }; vscode.Uri = { parse: value => value };
+  try {
+    await chat.login(); await chat.login(); assert.equal(requests, 1); assert.equal(chat.loginPending, true);
+    await assert.rejects(chat.send('must not run', 'ask'), /先完成 ChatGPT 登录/); assert.equal(chat.select('one'), false);
+    chat.newChat(); assert.equal(chat.chats.length, 1);
+    bridge.emit('notification', { method: 'account/login/completed', params: { loginId: 'foreign', success: true } }); assert.equal(chat.loginPending, true);
+    bridge.emit('notification', { method: 'account/login/completed', params: { loginId: 'project-login', success: true } }); await new Promise(resolve => setImmediate(resolve)); assert.equal(chat.loginPending, false);
+  } finally { chat.loginSession?.dispose(); vscode.env = oldEnv; vscode.Uri = oldUri; }
+});
+
+test('rename and delete recheck inline and dispatch locks after their dialogs return', async () => {
+  const savedInput = vscode.window.showInputBox, savedWarning = vscode.window.showWarningMessage;
+  try {
+    for (const method of ['renameChat', 'deleteChat']) {
+      const chat = fixture(); let finish;
+      vscode.window.showInputBox = () => new Promise(resolve => { finish = resolve; });
+      vscode.window.showWarningMessage = () => new Promise(resolve => { finish = resolve; });
+      const pending = chat[method](); chat.inlinePromptBusy = true; finish(method === 'renameChat' ? 'changed' : '确认'); await pending;
+      assert.equal(chat.chats.length, 1); assert.equal(chat.chats[0].name, 'existing');
+      chat.inlinePromptBusy = false; chat.queueDispatchToken = Symbol('dispatch');
+      vscode.window.showInputBox = vscode.window.showWarningMessage = () => { throw Error('Locked operation must not show dialog'); };
+      await chat[method]();
+    }
+  } finally { vscode.window.showInputBox = savedInput; vscode.window.showWarningMessage = savedWarning; }
+});
 test('account refresh keeps prior state until both responses arrive and discards a disconnected result', async () => {
   const chat = fixture(); let finishModels; const calls = [];
   chat.bridge = { call: async method => { calls.push(method); if (method === 'account/read') return { account: { type: 'chatgpt', planType: 'plus' } }; return new Promise(resolve => { finishModels = resolve; }); } };

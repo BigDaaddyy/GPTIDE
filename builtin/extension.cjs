@@ -16,6 +16,7 @@ const preferences = require('./preferences.cjs');
 const exec = promisify(execFile);
 
 class Chat {
+  actionLocked() { return !!(this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.loginPending); }
   constructor(context) {
     this.context = context; this.messages = []; this.chats = []; this.model = vscode.workspace.getConfiguration('gptide').get('model');
     this.preferences = preferences.values(vscode.workspace.getConfiguration('gptide'));
@@ -84,7 +85,7 @@ class Chat {
     } catch (e) { this.importWarning = 'Cursor 历史未能读取：' + e.message; }
   }
   select(id) {
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.invalidated) return false;
+    if (this.actionLocked() || this.invalidated) return false;
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey);
     if (!chat) return false;
     if (this.activeId) this.chatAttachments.set(this.activeId, this.attachments);
@@ -110,7 +111,7 @@ class Chat {
     } catch (error) { this.reviewWarning = '检查点未能读取或保存：' + error.message; }
   }
   selectCheckpoint(id) {
-    if (this.busy || this.reviewBusy || this.invalidated) return;
+    if (this.actionLocked() || this.invalidated) return;
     const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey), record = chat?.checkpoints?.find(c => c.id === id && c.projectKey === this.projectKey);
     if (!record || !this.checkpointStore) return;
     try { this.changes = this.checkpointStore.load(record); this.activeCheckpointId = id; chat.activeCheckpointId = id; this.reviewWarning = undefined; this.save(); }
@@ -123,7 +124,7 @@ class Chat {
     if (saved) saved.status = status;
   }
   cleanupCheckpoints() {
-    if (this.busy || this.reviewBusy || this.storageBlocked || !this.checkpointStore) return;
+    if (this.actionLocked() || this.storageBlocked || !this.checkpointStore) return;
     const current = storage.read(this.stateFile).state;
     if (current?.projectKey !== this.projectKey) throw new Error('项目记录归属无法核对');
     const states = [current];
@@ -137,13 +138,13 @@ class Chat {
     const result = this.checkpointStore.gc(records); vscode.window.showInformationMessage(`清理 ${result.removed} 个未引用内容块，释放 ${(result.bytes / 1024 / 1024).toFixed(1)} MiB`);
   }
   newChat() {
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.invalidated || this.storageBlocked) return;
+    if (this.actionLocked() || this.invalidated || this.storageBlocked) return;
     this.view?.webview.postMessage({ type: 'tabChangePending', projectKey: this.projectKey });
     const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: '新对话', messages: [], tasks: [], changes: [], updatedAt: Date.now() };
     this.chats.unshift(chat); this.select(chat.id); this.save();
   }
   branchChat(id, index, revision) {
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.invalidated || this.storageBlocked || id !== this.activeId || revision !== this.streamRevision) return false;
+    if (this.actionLocked() || this.invalidated || this.storageBlocked || id !== this.activeId || revision !== this.streamRevision) return false;
     const source = this.chats.find(chat => chat.id === id && chat.projectKey === this.projectKey);
     if (!source || !Number.isSafeInteger(index) || index < 0 || index >= source.messages.length) return false;
     const chat = { ...require('./conversation-branch.cjs').create(source, index, this.projectKey), id: crypto.randomUUID() };
@@ -169,7 +170,7 @@ class Chat {
   pauseQueue() { const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (chat) { chat.lastOutcome = this.cancelPendingSend ? 'interrupted' : 'failed'; if (chat.queue?.length) chat.queuePaused = true; this.save(); } }
   async dispatchQueue() {
     await this.ready;
-    if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.storageBlocked) return;
+    if (this.invalidated || this.actionLocked() || this.storageBlocked) return;
     const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey), item = chat?.queue?.[0];
     if (!item || chat.queuePaused || item.status !== 'pending') return;
     const token = Symbol('queue'); this.queueDispatchToken = token; item.status = 'starting';
@@ -184,7 +185,7 @@ class Chat {
   }
   async queueAction(type, id, direction) {
     const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (!chat || this.invalidated || this.storageBlocked) return;
-    if (this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('请先完成当前文件修改再操作队列');
+    if (this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.loginPending) throw new Error('请先完成当前文件修改或登录再操作队列');
     const queue = chat.queue || [], index = queue.findIndex(value => value.id === id), item = queue[index];
     if (type === 'queuePause') { chat.queuePaused = !chat.queuePaused; }
     else {
@@ -202,7 +203,7 @@ class Chat {
     this.save(); this.post(); if (!this.busy && !chat.queuePaused) this.scheduleQueue(chat.id);
   }
   closeTab(id, draft) {
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || !this.openChatIds.includes(id)) return;
+    if (this.actionLocked() || !this.openChatIds.includes(id)) return;
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (chat && typeof draft === 'string') this.persistDraft(id, draft);
     const index = this.openChatIds.indexOf(id); this.openChatIds.splice(index, 1);
     if (this.activeId === id) { const next = this.openChatIds[Math.max(0, index - 1)]; if (next) this.select(next); else this.newChat(); }
@@ -238,7 +239,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -338,7 +339,7 @@ class Chat {
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
   }
   async revert(file, redo = false) {
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.invalidated) return;
+    if (this.actionLocked() || this.invalidated) return;
     if (this.storageBlocked) throw new Error(this.historyWarning);
     const metadata = this.changes?.find(c => c.path === file); if (!metadata || (redo ? metadata.status !== 'reverted' : !['pending', 'accepted'].includes(metadata.status)) || !review.within(this.project, file)) return;
     if (!vscode.workspace.isTrusted) throw new Error('请先信任项目以撤销文件修改');
@@ -355,14 +356,14 @@ class Chat {
     } finally { this.reviewBusy = false; this.post(); }
   }
   async renameChat() {
-    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || chat.source === 'cursor' || this.busy || this.reviewBusy || this.storageBlocked || this.invalidated) return;
+    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || chat.source === 'cursor' || this.actionLocked() || this.storageBlocked || this.invalidated) return;
     const name = await vscode.window.showInputBox({ prompt: '对话名称', value: chat.name, validateInput: s => s.trim() ? null : '名称不能为空' });
-    if (name && !this.busy && !this.reviewBusy && !this.invalidated && this.chats.includes(chat)) { chat.name = name.trim(); this.save(); this.post(); }
+    if (name && !this.actionLocked() && !this.invalidated && this.activeId === chat.id && this.chats.includes(chat)) { chat.name = name.trim().slice(0, 200); this.save(); this.post(); }
   }
   async inlineEdit() {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换，已放弃改写。');
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('请等待当前任务完成后再改写选区。');
+    if (this.actionLocked()) throw new Error('请等待当前任务或登录完成后再改写选区。');
     const editor = vscode.window.activeTextEditor, document = editor?.document;
     if (!this.project || !document || document.uri.scheme !== 'file' || !review.within(this.project, document.uri.fsPath)) throw new Error('请先打开本项目中的代码文件。');
     if (!vscode.workspace.isTrusted) throw new Error('请先信任此项目，再使用 Ctrl+K 改写。');
@@ -373,7 +374,7 @@ class Chat {
     finally { this.inlinePromptBusy = false; this.post(); if (!instruction && !this.invalidated) this.scheduleQueue(this.activeId); }
     if (!instruction) return;
     if (this.invalidated) throw new Error('项目已切换，已放弃改写。');
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('已有任务开始，请等待完成。');
+    if (this.actionLocked()) throw new Error('已有任务开始，请等待完成。');
     if (!vscode.workspace.isTrusted) throw new Error('请先信任此项目，再使用 Ctrl+K 改写。');
     if (document.isClosed || !inlineCore.unchanged(snapshot, { text: document.getText(), version: document.version })) throw new Error('代码在输入要求期间发生变化，请重新选择后改写。');
     this.inlineBusy = true; this.post();
@@ -408,9 +409,9 @@ class Chat {
     } finally { if (this.inlineCancellation === cancellation) this.inlineCancellation = null; cancellation.dispose(); this.inlineBusy = false; this.post(); if (!this.invalidated) this.scheduleQueue(this.activeId); }
   }
   async deleteChat() {
-    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || this.busy || this.reviewBusy || this.storageBlocked || this.invalidated) return;
+    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;
     const answer = await vscode.window.showWarningMessage(chat.source === 'cursor' ? '从 GptIDE 隐藏此对话？Cursor 原记录会保留。' : '删除本地对话记录？', { modal: true }, '确认');
-    if (answer !== '确认' || this.busy || this.reviewBusy || this.invalidated || this.activeId !== chat.id || !this.chats.includes(chat)) return;
+    if (answer !== '确认' || this.actionLocked() || this.invalidated || this.activeId !== chat.id || !this.chats.includes(chat)) return;
     if (chat.source === 'cursor') this.hiddenCursorIds.push(chat.id);
     this.chats = this.chats.filter(c => c.id !== chat.id); this.openChatIds = this.openChatIds.filter(id => id !== chat.id);
     const next = this.openChatIds[0] || this.chats[0]?.id; if (next) this.select(next); else this.newChat(); this.save();
@@ -460,7 +461,7 @@ class Chat {
   }
   async reconnect() {
     await this.ready;
-    if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken) throw new Error('请先结束当前任务再重新连接');
+    if (this.invalidated || this.actionLocked()) throw new Error('请先结束当前任务或登录再重新连接');
     if (this.reconnecting) return;
     this.reconnecting = true;
     const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (chat?.queue?.length) { chat.queuePaused = true; this.save(); }
@@ -469,7 +470,7 @@ class Chat {
   async restoreRequest(id, revision, editVersion) {
     await this.ready;
     const chat = this.chats.find(value => value.id === id && value.projectKey === this.projectKey);
-    if (!chat || id !== this.activeId || revision !== this.streamRevision || this.invalidated || this.busy || this.queueDispatchToken || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.storageBlocked) throw new Error('当前对话状态已变化，无法恢复草稿');
+    if (!chat || id !== this.activeId || revision !== this.streamRevision || this.invalidated || this.actionLocked() || this.storageBlocked) throw new Error('当前对话状态已变化，无法恢复草稿');
     if (!chat.lastRequest) throw new Error('没有可取回的指令');
     if (chat.draft?.trim()) throw new Error('当前草稿已有内容，请先处理草稿');
     if (!this.persistDraft(id, chat.lastRequest)) throw new Error(this.draftWarning || '恢复草稿失败');
@@ -480,16 +481,24 @@ class Chat {
   async login() {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换');
-    if (this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('请先完成或停止当前任务，再切换 ChatGPT 账户');
     if (this.loginPending) return;
+    if (this.actionLocked()) throw new Error('请先完成或停止当前任务，再切换 ChatGPT 账户');
     this.loginPending = true;
-    try { const bridge = await this.connect(); if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('当前状态已变化，请完成任务后重试'); const result = await bridge.call('account/login/start', { type: 'chatgpt' }); if (this.invalidated) return; if (result.authUrl && !await vscode.env.openExternal(vscode.Uri.parse(result.authUrl))) throw new Error('无法打开登录页面'); this.status = '请在浏览器完成 ChatGPT 登录'; this.post(); }
-    finally { this.loginPending = false; }
+    this.status = '正在准备 ChatGPT 登录'; for (const chat of this.chats) if (chat.queue?.length) chat.queuePaused = true; this.save(); this.post();
+    try {
+      const bridge = await this.connect(); if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy) throw new Error('当前状态已变化，请完成任务后重试');
+      const session = new (require('./login-session.cjs').LoginSession)(bridge, {
+        open: url => vscode.env.openExternal(vscode.Uri.parse(url)), refresh: async () => { this.resumed = false; await this.refreshAccount(); },
+        state: message => { if (!this.invalidated && this.loginSession === session) { this.status = message; this.post(); } },
+        end: () => { if (this.loginSession === session) { this.loginSession = null; this.loginPending = false; if (!this.invalidated) this.post(); } }
+      }); this.loginSession = session; await session.begin();
+    } catch (error) { this.loginPending = false; this.post(); throw error; }
   }
   async send(text, mode, attach, clientSendId, queueId) {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换。');
     if (this.storageBlocked) throw new Error(this.historyWarning);
+    if (this.loginPending) throw new Error('请先完成 ChatGPT 登录，再发送任务');
     if (this.reviewBusy) throw new Error('请等待文件恢复完成');
     if (this.inlineBusy || this.inlinePromptBusy) throw new Error('请先完成或放弃 Ctrl+K 修改预览。');
     if (this.busy || typeof text !== 'string' || !text.trim()) return;
@@ -616,7 +625,7 @@ class Chat {
   onNotification({ method, params: p }) {
     if (this.invalidated || typeof method !== 'string') return;
     if (method === 'account/rateLimits/updated') { require('./usage.cjs').save(this.root, p).catch(() => {}); return; }
-    if (method === 'account/login/completed' && p?.success) { this.refreshAccount().catch(e => { this.status = e.message; this.post(); }); return; }
+    if (method === 'account/login/completed') return; // LoginSession owns the matching loginId.
     if (p?.threadId && p.threadId !== this.threadId) return;
     if (method === 'serverRequest/resolved') { const request = this.pendingRequests?.get(typeof p?.requestId + ':' + String(p?.requestId)); if (request && request.threadId === p?.threadId) { request.resolved = true; request.token.cancel(); } return; }
     if (method.startsWith('turn/') || method.startsWith('item/') || method === 'error') {
@@ -687,11 +696,11 @@ class Chat {
         if (['queuePause', 'queueEdit', 'queueRemove', 'queueMove', 'queueRetry'].includes(msg.type)) await this.queueAction(msg.type, msg.id, msg.direction);
         if (msg.type === 'stop' && this.busy) { const chat = this.chats.find(value => value.id === this.activeId); if (chat) chat.queuePaused = true; this.cancelPendingSend = true; this.status = '正在停止'; this.post(); if (this.turnId && this.bridge) await this.bridge.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }); else if (!this.bridge) this.pendingBridge?.dispose(); }
         if (msg.type === 'select') { if (!this.busy && this.select(msg.id)) this.save(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
-        if (msg.type === 'new') { if (!this.busy) this.newChat(); else this.post(); }
+        if (msg.type === 'new') { if (!this.actionLocked() && !this.storageBlocked) this.newChat(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'branch') { if (!this.branchChat(msg.id, msg.index, msg.revision)) { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
-        if (msg.type === 'closeTab' && !this.busy) this.closeTab(msg.id, msg.draft);
-        if (msg.type === 'model' && !this.busy && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); if (!model.supportedReasoningEfforts.some(e => e.reasoningEffort === this.effort)) this.effort = model.defaultReasoningEffort; this.save(); this.post(); }
-        if (msg.type === 'effort' && !this.busy && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
+        if (msg.type === 'closeTab') { if (!this.actionLocked()) this.closeTab(msg.id, msg.draft); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
+        if (msg.type === 'model' && !this.actionLocked() && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); if (!model.supportedReasoningEfforts.some(e => e.reasoningEffort === this.effort)) this.effort = model.defaultReasoningEffort; this.save(); this.post(); }
+        if (msg.type === 'effort' && !this.actionLocked() && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
         if (msg.type === 'attach') await this.attachFiles();
         if (msg.type === 'attachCurrent') await this.attachFiles(true);
         if (msg.type === 'attachDiagnostics') await this.attachContext('diagnostics');
@@ -707,14 +716,14 @@ class Chat {
         if (msg.type === 'openFile' && typeof msg.path === 'string' && this.project && this.tasks?.some(task => task.files?.includes(msg.path))) { const file = path.resolve(this.project, msg.path); if (review.within(this.project, file) && fs.existsSync(file) && fs.statSync(file).isFile()) await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file))); }
         if (msg.type === 'revert') await this.revert(msg.path);
         if (msg.type === 'redo') await this.revert(msg.path, true);
-        if (msg.type === 'accept' && !this.busy && !this.reviewBusy) { const change = this.changes.find(c => c.path === msg.path); if (change) { this.changeStatus(change, 'accepted'); this.save(); this.post(); } }
+        if (msg.type === 'accept' && !this.actionLocked()) { const change = this.changes.find(c => c.path === msg.path); if (change) { this.changeStatus(change, 'accepted'); this.save(); this.post(); } }
         if (msg.type === 'copy' && typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
         if (msg.type === 'openLink' && /^https?:\/\//i.test(msg.url)) await vscode.env.openExternal(vscode.Uri.parse(msg.url));
         if (msg.type === 'settings') await vscode.commands.executeCommand('gptide.settings');
         if (msg.type === 'usage') await vscode.commands.executeCommand('gptide.usage');
         if (msg.type === 'export') await this.exportChat();
         if (msg.type === 'copyTasks' && Array.isArray(msg.ids)) { const ids = new Set(msg.ids.filter(id => typeof id === 'string').slice(0, 200)), selected = (this.tasks || []).filter(t => ids.has(t.turnId + ':' + t.id)); await vscode.env.clipboard.writeText(require('./conversation.cjs').taskReport(selected)); }
-        if (msg.type === 'refresh' && !this.busy && !this.reviewBusy) { if (this.storageBlocked) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(); if (!this.select(this.activeId) && !this.select(this.chats[0]?.id)) this.newChat(); if (preferences.values(vscode.workspace.getConfiguration('gptide')).autoConnect) { await this.connect(); await this.refreshAccount(); } }
+        if (msg.type === 'refresh' && !this.actionLocked()) { if (this.storageBlocked) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(); if (!this.select(this.activeId) && !this.select(this.chats[0]?.id)) this.newChat(); if (preferences.values(vscode.workspace.getConfiguration('gptide')).autoConnect) { await this.connect(); await this.refreshAccount(); } }
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
         if (msg.type === 'terminal') await vscode.commands.executeCommand('workbench.action.terminal.toggleTerminal');
@@ -723,6 +732,7 @@ class Chat {
     this.post();
   }
   invalidateProject() {
+    this.loginSession?.dispose(); this.loginPending = false;
     vscode.commands?.executeCommand?.('gptide.cancelInlineInput')?.catch(() => {});
     clearTimeout(this.queueTimer); this.queueDispatchToken = null;
     this.inlineCancellation?.cancel();

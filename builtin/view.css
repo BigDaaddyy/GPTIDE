@@ -45,3 +45,15 @@ body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(
 .queue-panel{font-size:11px;border-top:1px solid var(--border);padding:5px 2px;margin-bottom:5px}.queue-controls{display:flex;gap:6px;align-items:center;color:var(--muted);padding:5px 0}.queue-row{display:flex;align-items:center;gap:5px;padding:5px 0;border-top:1px solid var(--border)}.queue-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.queue-row button{flex-shrink:0;font-size:10px}.queue-item-status{font-size:9px;color:var(--muted)}#queue-list{max-height:145px;overflow:auto}
 
 .recovery{display:flex;gap:6px;align-items:center;padding:5px 3px;margin-bottom:5px;color:var(--muted);font-size:10px;border-top:1px solid var(--border)}.recovery button{font-size:10px;padding:3px 5px;border:1px solid var(--border);border-radius:4px}
+
+/* Keep essential input and stop controls reachable when auxiliary content grows. */
+.footer-context{max-height:30dvh;overflow:auto;scrollbar-width:thin}
+.popup{max-width:calc(100vw - 16px);max-height:calc(100dvh - 60px);overflow:auto}
+.warning{max-height:min(96px,15dvh);overflow:auto;overflow-wrap:anywhere}
+.attachments{max-height:70px;overflow:auto}
+.task-panel,.review{flex-shrink:1;min-height:30px;max-height:20dvh}
+#queue-list{max-height:min(145px,20dvh)}
+textarea{max-height:min(200px,20dvh)}
+.recovery{flex-wrap:wrap}.recovery span{min-width:0;overflow-wrap:anywhere}
+@media(max-height:600px){.task-panel,.review{max-height:12dvh}#queue-list{max-height:15dvh}.attachments{max-height:8dvh}.warning{padding:4px 6px;margin-bottom:4px}textarea{max-height:15dvh}}
+@media(max-height:600px){.footer-context{max-height:22dvh}}
