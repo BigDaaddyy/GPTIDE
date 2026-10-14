@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -219,6 +219,7 @@
       "properties": {
         "gptide.codexPath": {
           "type": "string",
+          "restricted": true,
           "default": "",
           "description": "可选：Codex 可执行文件位置。"
         },

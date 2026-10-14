@@ -1,6 +1,6 @@
 const test = require('node:test'), assert = require('node:assert/strict'), Module = require('node:module');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
-const config = { get: (key, fallback) => fallback };
+const config = { get: (key, fallback) => key === 'codexPath' ? path.join(__dirname, 'unused-fixture-codex.exe') : fallback };
 const vscode = { workspace: { isTrusted: true, getConfiguration: () => config }, window: {} };
 vscode.CancellationTokenSource = class {
   constructor() { this.listeners = new Set(); this.token = { isCancellationRequested: false, onCancellationRequested: callback => { this.listeners.add(callback); return { dispose: () => this.listeners.delete(callback) }; } }; }
@@ -112,6 +112,22 @@ test('preparing a send locks its conversation and ignores duplicate send', async
   finishConnect({ call: async method => { calls++; assert.equal(method, 'turn/start'); return { turn: { id: 'turn' } }; } });
   await pending; assert.equal(calls, 1); assert.equal(chat.messages.length, 1); assert.equal(chat.messages[0].text, 'submitted');
 });
+test('reconnect restores only the connection, pauses queues and prevents duplicate refreshes', async () => {
+  const chat = fixture(); chat.chats[0].queue = [{ id: 'pending' }]; let finish, calls = 0; chat.connect = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  const pending = chat.reconnect(); await Promise.resolve(); await chat.reconnect(); assert.equal(calls, 1); finish(); await pending; assert.equal(chat.chats[0].queuePaused, true); assert.equal(chat.messages.length, 0);
+  chat.busy = true; await assert.rejects(chat.reconnect(), /结束当前任务/);
+});
+test('restore takes the last request into an empty draft without sending or replacing existing text', async () => {
+  const chat = fixture(), replies = []; chat.streamRevision = 3; chat.chats[0].lastRequest = 'QA failed request'; chat.chats[0].draft = ''; chat.view.webview.postMessage = value => replies.push(value);
+  chat.connect = () => { throw new Error('Restoring a draft must never connect'); }; await chat.restoreRequest('one', 3, 7); assert.equal(chat.chats[0].draft, 'QA failed request'); assert.equal(replies.find(value => value.type === 'draftRestored').editVersion, 7); assert.equal(chat.messages.length, 0);
+  await assert.rejects(chat.restoreRequest('one', 3, 8), /已有内容/); assert.equal(chat.chats[0].draft, 'QA failed request'); await assert.rejects(chat.restoreRequest('foreign', 3, 8), /状态已变化/);
+});
+test('expired transient previews report missing content while valid empty files stay empty', () => {
+  const chat = fixture(); chat.contextBefore = new Map([['empty', '']]); assert.equal(chat.beforeContent({ path: '/empty' }), ''); assert.throws(() => chat.beforeContent({ path: '/expired' }), /已过期/);
+});
+test('send retains its last attempted request even when connection preparation fails', async () => {
+  const chat = fixture(); chat.connect = async () => { throw new Error('QA cannot connect'); }; await assert.rejects(chat.send('attempted', 'ask', false), /cannot connect/); assert.equal(chat.chats[0].lastRequest, 'attempted'); assert.equal(chat.chats[0].lastOutcome, 'failed'); assert.equal(chat.busy, false);
+});
 test('queued send uses captured references without clearing next draft or emitting an unrelated input acknowledgment', async () => {
   const chat = fixture(), notifications = []; chat.busy = true; chat.attachments = [{ id: 'queued-file', label: 'a.js', path: 'QA/a.js', text: 'snapshot' }]; chat.view.webview.postMessage = value => notifications.push(value);
   await chat.enqueue('queued task', 'ask', 'queue-client'); assert.equal(chat.chats[0].queue.length, 1); assert.equal(chat.attachments.length, 0); assert.equal(notifications.find(value => value.type === 'queued').clientSendId, 'queue-client');
@@ -124,6 +140,13 @@ test('queue failure pauses without automatic retry and pause stops subsequent di
   let calls = 0; chat.connect = async () => { calls++; throw new Error('QA disconnected'); };
   await chat.dispatchQueue(); assert.equal(chat.chats[0].queuePaused, true); assert.equal(chat.chats[0].queue[0].status, 'failed'); await chat.dispatchQueue(); assert.equal(calls, 1);
   await chat.queueAction('queueRemove', chat.chats[0].queue[0].id); assert.equal(chat.chats[0].queue.length, 0); clearTimeout(chat.queueTimer);
+});
+test('failed turn unlocks unconfirmed queue immediately and its late RPC cannot overwrite edited pending work', async () => {
+  const chat = fixture(); chat.busy = true; await chat.enqueue('queued request', 'ask'); chat.busy = false; let rejectStart;
+  chat.connect = async () => ({ call: () => new Promise((resolve, reject) => { rejectStart = reject; }) }); const dispatch = chat.dispatchQueue(); await new Promise(resolve => setImmediate(resolve));
+  chat.onNotification({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'early-failed', status: 'failed', error: { message: 'QA early failure' } } } });
+  const item = chat.chats[0].queue[0]; assert.equal(item.status, 'failed'); assert.equal(chat.chats[0].queuePaused, true);
+  item.text = 'edited pending'; item.status = 'pending'; rejectStart(new Error('old RPC failure')); await dispatch; assert.equal(item.text, 'edited pending'); assert.equal(item.status, 'pending');
 });
 test('successful completion schedules the next queued instruction only for the active unpaused conversation', async () => {
   const chat = fixture(); chat.busy = true; chat.turnId = 'old'; chat.tasks = []; await chat.enqueue('follow-up', 'ask'); let calls = 0;

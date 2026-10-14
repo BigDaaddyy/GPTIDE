@@ -11,7 +11,7 @@ function render() {
   make('span', 'gptide-home-mark', 'G', brand); make('h1', '', 'GptIDE', brand);
   const meta = make('div', 'gptide-home-meta', '', home);
   const account = make('button', '', 'GPT 账户', meta); account.onclick = () => run('gptide.homeAccount');
-  make('span', '', '·', meta); const settings = make('button', '', '设置', meta); settings.onclick = () => run('workbench.action.openSettings');
+  make('span', '', '·', meta); const settings = make('button', '', '设置', meta); settings.onclick = () => run('gptide.settings');
   make('span', '', '·', meta); const usage = make('button', '', '用量', meta); usage.onclick = () => run('gptide.usage');
   const actions = make('div', 'gptide-home-actions', '', home);
   const tiles = [['folder-opened', '打开项目', 'workbench.action.files.openFolder'], ['repo-clone', '克隆仓库', 'git.clone'], ['terminal', '通过 SSH 连接', 'gptide.homeSSH'], ['account', 'GPT 账户', 'gptide.homeAccount']];

@@ -72,9 +72,10 @@ function install(vscode, context, root, currentChat) {
     context.subscriptions.push(own); publish();
   }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.diagnostics', async () => {
-    const executable = findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath'));
+    let executable, executableError;
+    try { executable = findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')); } catch (error) { executableError = error.message; }
     const chat = currentChat();
-    const data = { version: require('./package.json').version, account: require('./account.cjs').localInfo().label, executable, executableFound: path.isAbsolute(executable) ? fs.existsSync(executable) : 'PATH', configExists: fs.existsSync(path.join(codexHome(), 'config.toml')), projectCount: vscode.workspace.workspaceFolders?.length || 0, connection: chat?.bridge ? 'connected' : 'disconnected', preferences: require('./preferences.cjs').values(vscode.workspace.getConfiguration('gptide')), historyBlocked: !!chat?.storageBlocked, historyConflict: !!chat?.conflictFile };
+    const data = { version: require('./package.json').version, account: require('./account.cjs').localInfo().label, executable: executable || null, executableError, executableFound: !!executable && fs.existsSync(executable), configExists: fs.existsSync(path.join(codexHome(), 'config.toml')), projectCount: vscode.workspace.workspaceFolders?.length || 0, connection: chat?.bridge ? 'connected' : 'disconnected', preferences: require('./preferences.cjs').values(vscode.workspace.getConfiguration('gptide')), historyBlocked: !!chat?.storageBlocked, historyConflict: !!chat?.conflictFile };
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify(data, null, 2) }));
   }));
   return { refresh: () => panel?.webview.postMessage({ type: 'live', effective: effective(chatNow()) }) };

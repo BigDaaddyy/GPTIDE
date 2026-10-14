@@ -4,15 +4,23 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 
-function findCodex(explicit) {
-  if (explicit) return explicit;
-  const base = path.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin');
-  if (fs.existsSync(base)) {
+function findCodex(explicit, env = process.env) {
+  if (explicit !== undefined && explicit !== null && typeof explicit !== 'string') throw new Error('Codex 路径必须是字符串');
+  if (explicit && path.isAbsolute(explicit)) return explicit;
+  if (explicit && !['codex', 'codex.exe'].includes(explicit.toLowerCase())) throw new Error('请配置 Codex 可执行文件的完整路径');
+  const base = typeof env.LOCALAPPDATA === 'string' && path.isAbsolute(env.LOCALAPPDATA) ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
+  if (!explicit && base && fs.existsSync(base)) {
     const found = fs.readdirSync(base).map(n => path.join(base, n, 'codex.exe')).filter(p => fs.existsSync(p));
     found.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
     if (found.length) return found[0];
   }
-  return process.platform === 'win32' ? 'codex.exe' : 'codex';
+  const name = process.platform === 'win32' ? 'codex.exe' : 'codex';
+  for (const entry of (env.PATH || env.Path || '').split(path.delimiter)) {
+    const directory = entry.replace(/^"|"$/g, ''); if (!path.isAbsolute(directory)) continue;
+    const file = path.join(directory, name);
+    try { if (fs.statSync(file).isFile()) { fs.accessSync(file, fs.constants.X_OK); return file; } } catch {}
+  }
+  throw new Error('未找到 Codex 可执行文件，请安装 Codex 桌面应用或配置完整路径');
 }
 
 class Bridge extends EventEmitter {

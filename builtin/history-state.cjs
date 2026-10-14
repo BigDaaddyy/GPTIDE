@@ -15,6 +15,8 @@ function chats(value) {
     optional(chat, 'branch', value => object(value) && string(value.id) && string(value.name) && Number.isSafeInteger(value.messageIndex) && value.messageIndex >= 0 && value.messageIndex < (chat.messages?.length || 0));
     if (chat.branch && chat.backgroundCount !== chat.branch.messageIndex + 1) invalid('分支背景范围');
     optional(chat, 'queuePaused', value => typeof value === 'boolean');
+    optional(chat, 'lastRequest', value => string(value) && value.length <= 100000);
+    optional(chat, 'lastOutcome', value => ['preparing', 'running', 'completed', 'failed', 'interrupted', 'unknown'].includes(value));
     optional(chat, 'queue', value => require('./message-queue.cjs').validate(value, chat.id, chat.projectKey));
     optional(chat, 'messages', list => Array.isArray(list) && list.every(message => object(message) && (message.text === undefined || string(message.text)) && (message.role === undefined || string(message.role)) && (message.attachments === undefined || strings(message.attachments))));
     optional(chat, 'tasks', list => Array.isArray(list) && list.every(task => object(task) && (task.files === undefined || strings(task.files)) && ['id', 'turnId', 'kind', 'title', 'status', 'output'].every(field => task[field] === undefined || string(task[field]))));

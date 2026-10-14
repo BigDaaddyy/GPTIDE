@@ -64,6 +64,7 @@ class Chat {
       this.status = '连接失败：' + error.message;
     }
     this.loadingScope = false;
+    for (const chat of this.chats) if (['preparing', 'running'].includes(chat.lastOutcome)) chat.lastOutcome = 'unknown';
     for (const chat of this.chats) if (chat.queue?.length) { chat.queuePaused = true; for (const item of chat.queue) if (item.status === 'starting') { item.status = 'failed'; item.error = '上次发送状态未确认，请检查对话后重试'; } }
     if (this.quarantinedChats.length) this.scopeWarning = `已隐藏 ${this.quarantinedChats.length} 条无法确认当前项目归属的记录。`;
     if (!this.activeId || !this.chats.some(c => c.id === this.activeId)) this.activeId = this.chats[0]?.id;
@@ -165,7 +166,7 @@ class Chat {
   scheduleQueue(id) {
     clearTimeout(this.queueTimer); this.queueTimer = setTimeout(() => { this.queueTimer = null; if (this.activeId === id && !this.invalidated) this.dispatchQueue().catch(error => { if (!this.invalidated) { this.status = error.message; this.post(); } }); }, 0);
   }
-  pauseQueue() { const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (chat?.queue?.length) { chat.queuePaused = true; this.save(); } }
+  pauseQueue() { const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (chat) { chat.lastOutcome = this.cancelPendingSend ? 'interrupted' : 'failed'; if (chat.queue?.length) chat.queuePaused = true; this.save(); } }
   async dispatchQueue() {
     await this.ready;
     if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken || this.storageBlocked) return;
@@ -175,9 +176,10 @@ class Chat {
     try {
       if (!this.save()) throw new Error(this.historyWarning || '队列保存失败');
       await this.send(item.text, item.mode, false, undefined, item.id);
+      if (this.queueDispatchToken !== token) return;
       if (!this.busy && chat.queue?.some(value => value.id === item.id)) throw new Error('排队发送未确认，请检查对话后重试');
     } catch (error) {
-      if (!this.invalidated && chat.queue?.some(value => value.id === item.id)) { item.status = 'failed'; item.error = error.message; chat.queuePaused = true; this.save(); this.status = error.message; this.post(); }
+      if (!this.invalidated && this.queueDispatchToken === token && chat.queue?.some(value => value.id === item.id)) { item.status = 'failed'; item.error = error.message; chat.queuePaused = true; this.save(); this.status = error.message; this.post(); }
     } finally { if (this.queueDispatchToken === token) this.queueDispatchToken = null; }
   }
   async queueAction(type, id, direction) {
@@ -236,7 +238,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -314,6 +316,7 @@ class Chat {
     while (this.contextBefore.size > 40) this.contextBefore.delete(this.contextBefore.keys().next().value);
     await vscode.commands.executeCommand('vscode.diff', vscode.Uri.parse('gptide-before:/' + id), vscode.Uri.parse('gptide-before:/' + id + '-after'), `${change.relative} · 此轮修改前 ↔ 修改后`);
   }
+  beforeContent(uri) { const key = uri.path.slice(1); if (!this.contextBefore?.has(key)) throw new Error('临时预览已过期，请重新生成或查看保存的检查点'); return this.contextBefore.get(key); }
   async showCurrentDiff(file) {
     const metadata = this.changes?.find(c => c.path === file); if (!metadata || !review.within(this.project, file)) return;
     const change = this.checkpointStore ? this.checkpointStore.materialize(metadata) : metadata;
@@ -376,6 +379,7 @@ class Chat {
     this.inlineBusy = true; this.post();
     const cancellation = new vscode.CancellationTokenSource(); this.inlineCancellation = cancellation;
     try {
+      const fixed = this.fixedContext?.read(); if (fixed) { snapshot.projectContext = fixed.text; if (fixed.warnings.length) this.contextWarning = fixed.warnings.join('；'); }
       const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GptIDE 正在改写选区', cancellable: true }, async (_, token) => {
         const relay = token.onCancellationRequested(() => cancellation.cancel());
         if (token.isCancellationRequested || this.invalidated) cancellation.cancel();
@@ -388,7 +392,7 @@ class Chat {
       if (document.isClosed || !inlineCore.unchanged(snapshot, current())) throw new Error('代码在生成期间发生变化或文件已关闭，已放弃应用。');
       const proposed = inlineCore.proposal(snapshot, replacement);
       if (proposed.text === snapshot.text) { vscode.window.showInformationMessage('模型未提出代码变化。'); return; }
-      const id = crypto.randomUUID(); this.contextBefore ||= new Map(); this.contextBefore.set(id + '-before', snapshot.text); this.contextBefore.set(id + '-after', proposed.text);
+      const id = crypto.randomUUID(); this.contextBefore ||= new Map(); this.contextBefore.set(id + '-before', snapshot.text); this.contextBefore.set(id + '-after', proposed.text); while (this.contextBefore.size > 40) this.contextBefore.delete(this.contextBefore.keys().next().value);
       const before = vscode.Uri.parse('gptide-before:/' + id + '-before'), after = vscode.Uri.parse('gptide-before:/' + id + '-after');
       await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(before), document.languageId);
       await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(after), document.languageId);
@@ -413,8 +417,8 @@ class Chat {
   }
   async connect() {
     if (this.invalidated) throw new Error('项目已切换');
-    if (this.bridge) return this.bridge;
     if (this.connecting) return this.connecting;
+    if (this.bridge) return this.bridge;
     this.connecting = (async () => {
       const bridge = new Bridge(findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')), this.project || this.root, { timeout: preferences.values(vscode.workspace.getConfiguration('gptide')).rpcTimeout });
       this.pendingBridge = bridge;
@@ -454,6 +458,25 @@ class Chat {
     if (!current?.supportedReasoningEfforts?.some(e => e.reasoningEffort === this.effort)) this.effort = current?.defaultReasoningEffort || 'medium';
     this.status = this.account ? `ChatGPT ${(this.account.plan || '').toUpperCase()} 已连接` : '请使用 ChatGPT 登录'; this.post();
   }
+  async reconnect() {
+    await this.ready;
+    if (this.invalidated || this.busy || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.queueDispatchToken) throw new Error('请先结束当前任务再重新连接');
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey); if (chat?.queue?.length) { chat.queuePaused = true; this.save(); }
+    try { if (this.bridge && !this.connecting) await this.refreshAccount(); else await this.connect(); } finally { this.reconnecting = false; }
+  }
+  async restoreRequest(id, revision, editVersion) {
+    await this.ready;
+    const chat = this.chats.find(value => value.id === id && value.projectKey === this.projectKey);
+    if (!chat || id !== this.activeId || revision !== this.streamRevision || this.invalidated || this.busy || this.queueDispatchToken || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.storageBlocked) throw new Error('当前对话状态已变化，无法恢复草稿');
+    if (!chat.lastRequest) throw new Error('没有可取回的指令');
+    if (chat.draft?.trim()) throw new Error('当前草稿已有内容，请先处理草稿');
+    if (!this.persistDraft(id, chat.lastRequest)) throw new Error(this.draftWarning || '恢复草稿失败');
+    this.save();
+    this.status = '已取回上次指令 · 尚未发送';
+    this.view?.webview.postMessage({ type: 'draftRestored', projectKey: this.projectKey, id, text: chat.lastRequest, editVersion }); this.post();
+  }
   async login() {
     await this.ready;
     if (this.invalidated) throw new Error('项目已切换');
@@ -480,7 +503,9 @@ class Chat {
     const isCurrent = () => this.sendEpoch === epoch && !this.invalidated;
     const check = () => { if (!isCurrent()) throw new Error('发送状态已失效'); if (this.cancelPendingSend) throw new Error('已取消发送'); };
     if (mode === 'agent' && !vscode.workspace.isTrusted) throw new Error('请先在 VS Code 的工作区信任中信任此项目，或使用 Ask / Plan 只读模式');
-    this.sendEpoch = epoch; this.busy = true; this.cancelPendingSend = false; this.status = '正在准备'; this.post();
+    this.sendEpoch = epoch; this.busy = true; this.cancelPendingSend = false; submitted.lastRequest = text; submitted.lastOutcome = 'preparing';
+    if (!this.save()) { this.busy = false; throw new Error(this.historyWarning || '请求记录未能保存'); }
+    this.status = '正在准备'; this.post();
     let bridge;
     try {
       bridge = await this.connect();
@@ -512,7 +537,7 @@ class Chat {
           }
           importedContext = '以下是从 Cursor 导入的历史对话，仅作为项目背景。请以用户当前请求为准。\n' + transcript.slice(-importLimit) + '\n\n当前请求：\n';
         }
-        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, draftVersion: selected?.draftVersion || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], backgroundPending: !!selected, backgroundCount: selected?.messages.length || 0, updatedAt: Date.now() };
+        const chat = { id: crypto.randomUUID(), projectKey: this.projectKey, source: 'gptide', name: text.slice(0, 40), draft: selected?.draft || '', draftUpdatedAt: selected?.draftUpdatedAt || 0, draftVersion: selected?.draftVersion || 0, messages: selected ? selected.messages.map(m => ({ ...m })) : [], lastRequest: text, lastOutcome: 'preparing', backgroundPending: !!selected, backgroundCount: selected?.messages.length || 0, updatedAt: Date.now() };
         this.chats.unshift(chat); if (!this.openChatIds.includes(chat.id)) this.openChatIds.push(chat.id); this.activeId = chat.id; this.messages = chat.messages; this.threadId = null; this.resumed = false;
       }
       const named = this.chats.find(c => c.id === this.activeId); if (named?.name === '新对话' && !named.messages.length) named.name = text.slice(0, 40);
@@ -558,6 +583,7 @@ class Chat {
     if (!pending || pending.epoch !== epoch || this.sendEpoch !== epoch || this.invalidated) return;
     this.pendingSubmission = null;
     const background = this.chats.find(chat => chat.id === pending.chatId && chat.projectKey === this.projectKey);
+    if (background) { background.lastOutcome = 'running'; this.save(); }
     if (background?.backgroundPending) { background.backgroundPending = false; this.save(); }
     if (pending.queueId && background) { background.queue = background.queue.filter(item => item.id !== pending.queueId); this.save(); }
     if (pending.clearDraft !== false) for (const id of pending.ids) { const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (chat?.draft === pending.draftText && (chat.draftVersion || 0) === pending.draftVersion) this.persistDraft(id, ''); }
@@ -622,6 +648,7 @@ class Chat {
     if (method === 'error') { if (!p.willRetry) this.finishTurn({ id: p.turnId, status: 'failed', error: p.error }); else { this.status = p.error?.message || '正在重试'; this.save(); this.post(); } }
   }
   finishTurn(turn) {
+    const unconfirmedQueueId = this.pendingSubmission?.queueId;
     this.finishedSendEpoch = this.sendEpoch;
     if (turn.status !== 'failed' && this.pendingSubmission?.threadId === this.threadId) this.acknowledgeSubmission(this.pendingSubmission.epoch);
     this.pendingSubmission = null;
@@ -633,7 +660,10 @@ class Chat {
       catch (error) { this.importWarning = '修改预览读取失败：' + error.message; }
       this.baseline = null;
     }
-    if (chat) { chat.updatedAt = Date.now(); if (turn.status !== 'completed') chat.queuePaused = true; }
+    if (chat) {
+      chat.updatedAt = Date.now(); chat.lastOutcome = ['completed', 'failed', 'interrupted'].includes(turn.status) ? turn.status : 'unknown'; if (turn.status !== 'completed') chat.queuePaused = true;
+      const item = chat.queue?.find(value => value.id === unconfirmedQueueId); if (item && turn.status === 'failed') { item.status = 'failed'; item.error = turn.error?.message || '任务失败，请检查对话后重试'; }
+    }
     this.queueDispatchToken = null; this.save(); this.post();
     if (chat?.queue?.length && !chat.queuePaused && turn.status === 'completed') this.scheduleQueue(chat.id);
   }
@@ -650,6 +680,8 @@ class Chat {
         if (msg.type === 'ready') this.post();
         if (msg.type === 'draft') { const saved = this.persistDraft(msg.id, msg.text); this.view?.webview.postMessage({ type: 'draftSaved', projectKey: this.projectKey, id: msg.id, sequence: msg.sequence, saved, history: history.entries(this.chats.filter(c => c.projectKey === this.projectKey), this.activeId) }); }
         if (msg.type === 'login') await this.login();
+        if (msg.type === 'reconnect') await this.reconnect();
+        if (msg.type === 'restoreRequest') await this.restoreRequest(msg.id, msg.revision, msg.editVersion);
         if (msg.type === 'send') await this.send(msg.text, msg.mode, msg.attach, typeof msg.clientSendId === 'string' && msg.clientSendId.length <= 160 ? msg.clientSendId : undefined);
         if (msg.type === 'enqueue') await this.enqueue(msg.text, msg.mode, msg.clientSendId);
         if (['queuePause', 'queueEdit', 'queueRemove', 'queueMove', 'queueRetry'].includes(msg.type)) await this.queueAction(msg.type, msg.id, msg.direction);
@@ -730,7 +762,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.exportChat', () => chat.exportChat().catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.login', () => chat.login()));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy || chat.reviewBusy) return vscode.window.showInformationMessage('请先等待当前任务完成'); if (chat.storageBlocked) return vscode.commands.executeCommand('workbench.action.reloadWindow'); await chat.importCursor(); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
-  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.contextBefore?.get(uri.path.slice(1)) || '' }));
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.beforeContent(uri) }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-checkpoint', { provideTextDocumentContent: uri => { const [owner, hash] = uri.path.split('/').filter(Boolean); if (owner !== chat.projectKey) throw new Error('检查点不属于当前项目'); if (hash === 'empty') return ''; if (!chat.checkpointStore) throw new Error('检查点存储不可用'); return chat.checkpointStore.get(hash); } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.cleanupCheckpoints', () => { try { chat.cleanupCheckpoints(); } catch (error) { vscode.window.showErrorMessage(error.message); } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.attachSelection', () => chat.attachFiles(true)));

@@ -26,7 +26,7 @@ class ProjectContext {
   excluded(relative) {
     const normalized = value => process.platform === 'win32' ? value.replaceAll('\\', '/').toLowerCase() : value;
     const name = normalized(relative);
-    return this.state.excluded.some(value => name === normalized(value).replace(/\/$/, '') || name.startsWith(normalized(value).replace(/\/$/, '') + '/'));
+    return this.state.excluded.some(value => value === '.' || name === normalized(value).replace(/\/$/, '') || name.startsWith(normalized(value).replace(/\/$/, '') + '/'));
   }
   labels() { return [...(this.state.rules.trim() ? ['项目规则'] : []), ...this.state.files.filter(file => !this.excluded(file))]; }
   read(maximum = 60000) {

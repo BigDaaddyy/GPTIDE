@@ -1,5 +1,13 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const { Bridge } = require('../builtin/bridge.cjs');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+test('Codex discovery resolves absolute install paths and never falls back to a project-local executable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-cli-path-'));
+  try {
+    const find = require('../builtin/bridge.cjs').findCodex, file = path.join(root, process.platform === 'win32' ? 'codex.exe' : 'codex'); fs.writeFileSync(file, 'fixture', { mode: 0o755 });
+    assert.equal(find('', { PATH: root }), file); assert.throws(() => find('', { PATH: '.' }), /未找到/); assert.throws(() => find('./codex.exe', { PATH: root }), /完整路径/); assert.equal(find(file, {}), file);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const Module = require('node:module');

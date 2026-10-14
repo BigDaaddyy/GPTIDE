@@ -208,6 +208,10 @@ function render(s) {
   for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
   el('send').disabled = !!s.inlineBusy || !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
+  el('recovery').hidden = s.busy || s.inlineBusy || !['failed', 'interrupted', 'unknown'].includes(s.lastOutcome);
+  el('recovery-label').textContent = s.lastOutcome === 'unknown' ? '上次结果未确认' : s.lastOutcome === 'interrupted' ? '任务已停止' : '任务未完成';
+  el('restore-request').disabled = !s.canRestore || !!el('input').value.trim() || s.storageBlocked; el('restore-request').title = '只取回草稿，不发送；当前草稿需为空';
+  el('recover-connect').disabled = !!s.reviewBusy || !!s.storageBlocked;
   el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
   el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
   renderQueue(s);
@@ -273,7 +277,7 @@ function performQuickAction(action, remainder, query) {
   else { flushDraft(); if (action.action === 'new') beginTabChange(); post(action.action); }
   if (!pendingTabChange) input.focus();
 }
-function resizeInput() { el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
+function resizeInput() { el('restore-request').disabled = !!el('input').value.trim() || !state.canRestore || !!state.storageBlocked; el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
 function flushDraft() { clearTimeout(draftTimer); if (draftKey === undefined || draftKey === '__new__' || invalidated) return; post('draft', { id: draftKey, text: el('input').value, sequence: ++draftSequence }); }
 function beginTabChange() { pendingTabChange = true; el('input').disabled = true; }
 function scheduleDraft() { clearTimeout(draftTimer); el('draft-state').textContent = el('input').value ? '草稿…' : ''; draftTimer = setTimeout(flushDraft, 650); }
@@ -283,6 +287,7 @@ window.addEventListener('message', event => {
   if (data.type === 'tabChangePending') beginTabChange();
   if (data.type === 'tabChangeRejected') { pendingTabChange = false; el('input').disabled = !!state.loadingScope || !!state.storageBlocked; }
   if (data.type === 'state') render(data);
+  if (data.type === 'draftRestored' && data.id === draftKey && data.editVersion === inputRevision && !el('input').value.trim()) { el('input').value = data.text; el('input').dispatchEvent(new Event('input', { bubbles: true })); el('input').focus(); }
   if (data.type === 'stream') {
     if (data.revision !== state.revision || data.activeId !== state.activeId) return;
     const messages = state.messages.slice(), updates = data.messages;
@@ -330,6 +335,8 @@ el('enqueue').onclick = () => {
   flushDraft(); closeQuickActions(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
 };
 el('queue-pause').onclick = () => post('queuePause');
+el('restore-request').onclick = () => { flushDraft(); post('restoreRequest', { id: state.activeId, revision: state.revision, editVersion: inputRevision }); };
+el('recover-connect').onclick = () => post('reconnect'); el('reconnect').onclick = () => { el('menu').hidden = true; post('reconnect'); };
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };

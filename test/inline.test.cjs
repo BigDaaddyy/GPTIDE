@@ -11,4 +11,5 @@ test('inline proposals preserve surroundings, line endings and reject stale docu
   assert.throws(() => core.parse('```js\ncode\n```'));
   assert.throws(() => core.parse('{"replacement":false}'));
   assert.match(core.prompt(snapshot, 'modify selected'), /不要调用工具/);
+  assert.ok(core.prompt({ ...snapshot, projectContext: 'QA project rules' }, 'modify selected').includes('QA project rules'));
 });
