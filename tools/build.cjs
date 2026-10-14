@@ -12,11 +12,13 @@ const workbenchJs = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench',
 const nativePatch = require('./workbench-patch.cjs');
 fs.writeFileSync(workbenchJs, nativePatch.homePage(nativePatch.gptAccountMenu(nativePatch.hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8'))), fs.readFileSync(path.join(__dirname, 'home-render.js'), 'utf8')));
 fs.writeFileSync(workbenchJs, nativePatch.inlineInput(fs.readFileSync(workbenchJs, 'utf8'), fs.readFileSync(path.join(__dirname, 'inline-widget.js'), 'utf8')));
+fs.writeFileSync(workbenchJs,nativePatch.compactChatChrome(fs.readFileSync(workbenchJs,'utf8')));
 const target = path.join(app, 'resources', 'app', 'extensions', 'gptide-chat');
 fs.mkdirSync(target, { recursive: true });
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(path.join(root, 'builtin', name), path.join(target, name));
 const runtime = path.join(root, 'runtime'); fs.mkdirSync(runtime, { recursive: true }); fs.copyFileSync(process.execPath, path.join(runtime, 'node.exe'));
 const productFile = path.join(app, 'resources', 'app', 'product.json'); const product = JSON.parse(fs.readFileSync(productFile, 'utf8'));
+product.extensionEnabledApiProposals ||= {};product.extensionEnabledApiProposals['gptide.gptide-chat']=['contribSourceControlInputBoxMenu'];
 Object.assign(product, { nameShort: 'GptIDE', nameLong: 'GptIDE', gptideVersion: require('../package.json').version, applicationName: 'gptide', dataFolderName: '.gptide', sharedDataFolderName: '.gptide-shared', win32AppUserModelId: 'GptIDE.Desktop', urlProtocol: 'gptide' });
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.css'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchCss)).digest('base64').replace(/=+$/, '');
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.js'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchJs)).digest('base64').replace(/=+$/, '');

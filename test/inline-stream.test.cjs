@@ -7,15 +7,19 @@ test('inline stream rejects foreign turns, ignores malformed events and bounds o
  stream.receive({method:'item/agentMessage/delta',params:{threadId:'own',turnId:'turn',itemId:'answer',delta:'{"replacement":"QA"}'}});stream.receive({method:'turn/completed',params:{threadId:'own',turn:{id:'turn',status:'completed'}}});assert.equal(resolved,'QA');assert.equal(rejected,undefined);assert.equal(stops,0);
  const large=create('own',{resolve(){},reject:error=>rejected=error},()=>stops++);large.receive({method:'item/agentMessage/delta',params:{threadId:'own',turnId:'turn',itemId:'large',delta:'x'.repeat(2*1024*1024+1)}});assert.match(rejected.message,/过大/);assert.equal(stops,1);
 });
-let behavior='early-complete';
+let behavior='early-complete',calls=[];
 class FakeBridge extends EventEmitter{
  async start(){} send(){} dispose(){this.closed=true;this.rejectStart?.(new Error('QA disposed'));this.emit('disconnected',new Error('QA disposed'));}
- async call(method){if(method==='account/read')return{account:{type:'chatgpt'}};if(method==='thread/start')return{thread:{id:'own'}};return new Promise((resolve,reject)=>{this.rejectStart=reject;queueMicrotask(()=>{this.emit('notification',{method:'turn/started',params:{threadId:'own',turn:{id:'turn'}}});if(behavior==='confirmed-timeout'){reject(new Error('turn/start 超时'));setTimeout(()=>this.complete(),10);}else this.complete();});});}
- complete(){this.emit('notification',{method:'item/agentMessage/delta',params:{threadId:'own',turnId:'turn',itemId:'answer',delta:'{"replacement":"QA result"}'}});this.emit('notification',{method:'turn/completed',params:{threadId:'own',turn:{id:'turn',status:'completed'}}});}
+ async call(method,params){calls.push({method,params});if(method==='account/read')return{account:{type:'chatgpt'}};if(method==='model/list')return{data:[{model:'official',supportedReasoningEfforts:[{reasoningEffort:'high'}]}]};if(method==='thread/start')return{thread:{id:'own'}};return new Promise((resolve,reject)=>{this.rejectStart=reject;queueMicrotask(()=>{this.emit('notification',{method:'turn/started',params:{threadId:'own',turn:{id:'turn'}}});if(behavior==='confirmed-timeout'){reject(new Error('turn/start 超时'));setTimeout(()=>this.complete(),10);}else this.complete();});});}
+ complete(){this.emit('notification',{method:'item/agentMessage/delta',params:{threadId:'own',turnId:'turn',itemId:'answer',delta:behavior==='commit'?'{"message":"feat: add feature"}':'{"replacement":"QA result"}'}});this.emit('notification',{method:'turn/completed',params:{threadId:'own',turn:{id:'turn',status:'completed'}}});}
 }
 const original=Module.prototype.require,file=require.resolve('../builtin/inline-agent.cjs'),cached=require.cache[file];let generate;
 try{delete require.cache[file];Module.prototype.require=function(id){return id==='./bridge.cjs'?{Bridge:FakeBridge}:original.apply(this,arguments);};generate=require('../builtin/inline-agent.cjs').generate;}finally{Module.prototype.require=original;if(cached)require.cache[file]=cached;else delete require.cache[file];}
 test('inline completion before RPC acknowledgment and confirmed timeout preserve valid output',async()=>{
  const args={executable:'unused',cwd:'QA',model:'fixture',snapshot:{file:'QA',text:'code',start:0,end:4},instruction:'QA'};
  behavior='early-complete';assert.equal(await generate(args),'QA result');behavior='confirmed-timeout';assert.equal(await generate(args),'QA result');
+});
+test('commit generation uses official advertised models and an ephemeral readonly schema task',async()=>{
+ const core=require('../builtin/commit-message.cjs');behavior='commit';calls=[];assert.equal(await generate({executable:'unused',cwd:'QA',model:'unavailable',effort:'medium',task:core.task({mode:'staged',text:'diff'},'')}),'feat: add feature');
+ const start=calls.find(c=>c.method==='thread/start').params,turn=calls.find(c=>c.method==='turn/start').params;assert.equal(start.ephemeral,true);assert.equal(start.sandbox,'read-only');assert.equal(start.approvalPolicy,'never');assert.equal(turn.model,'official');assert.equal(turn.effort,'high');assert.deepEqual(turn.outputSchema,core.schema);
 });

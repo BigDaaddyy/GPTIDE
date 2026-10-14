@@ -2,11 +2,12 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "engines": {
     "vscode": "^1.100.0"
   },
   "main": "./extension.cjs",
+  "enabledApiProposals": ["contribSourceControlInputBoxMenu"],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true
@@ -24,6 +25,12 @@
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "gptide.generateCommitMessage",
+        "title": "AI 编写提交信息",
+        "icon": "$(sparkle)",
+        "enablement": "workspaceFolderCount == 1 && !gptide.commitMessageBusy"
+      },
       {
         "command": "gptide.accountInfo",
         "title": "GPT 账户状态"
@@ -127,6 +134,13 @@
       }
     ],
     "menus": {
+      "scm/inputBox": [
+        {
+          "command": "gptide.generateCommitMessage",
+          "when": "scmProvider == git && workspaceFolderCount == 1",
+          "group": "navigation@1"
+        }
+      ],
       "editor/context": [
         {
           "command": "gptide.inlineEdit",

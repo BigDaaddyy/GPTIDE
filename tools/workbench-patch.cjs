@@ -35,4 +35,17 @@ function inlineInput(source, widgetSource) {
   if (source.split(anchor).length !== 2 || !source.includes('const o=e.get(Ai),r=o.getFocusedCodeEditor()||o.getActiveCodeEditor()')) throw new Error('原生编辑器命令结构已变化，请更新 Ctrl+K 补丁');
   return source.replace(anchor, start + widgetSource + end + anchor);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput };
+function compactChatChrome(source){
+  const relayoutMarker='/* GPTIDE: relayout chat chrome */';
+  if(!source.includes(relayoutMarker)){
+    const open='this.activePaneContextKey.set(t),this.element.dataset.activeComposite=t}',close='this.activePaneContextKey.reset(),delete this.element.dataset.activeComposite)';
+    if(!source.includes(open)||!source.includes(close))throw new Error('原生侧栏切换结构已变化，请更新聊天栏补丁');
+    source=source.replace(open,'this.activePaneContextKey.set(t),this.element.dataset.activeComposite=t;'+relayoutMarker+'this.partId==="workbench.parts.auxiliarybar"&&this.relayout()}').replace(close,'this.activePaneContextKey.reset(),delete this.element.dataset.activeComposite,this.partId==="workbench.parts.auxiliarybar"&&this.relayout())');
+  }
+  const marker='/* GPTIDE: compact chat chrome */',condition='const gptideCompact=this.contentArea?.parentElement?.id==="workbench.parts.auxiliarybar"&&this.contentArea?.parentElement?.dataset.activeComposite==="workbench.view.extension.gptide";';if(source.includes(marker))return source.replace(/const gptideCompact=[^;]+;/,condition);
+  const start=source.indexOf('layout(e,t){const s=this.layoutService.isFloatingPanelsEnabled();let n;if(this.options.hasTitle)'),end=source.indexOf('setFooterVisibility(e)',start);
+  if(start<0||end<0||end-start>1600)throw new Error('原生侧栏布局结构已变化，请更新聊天栏补丁');
+  const original=source.slice(start,end),patched=original.replace('let n;if(this.options.hasTitle)',marker+condition+'let n;if(this.options.hasTitle&&!gptideCompact)').replace('if(this.headerVisible)','if(this.headerVisible&&!gptideCompact)').replace('if(this.footerVisible)','if(this.footerVisible&&!gptideCompact)');
+  return source.slice(0,start)+patched+source.slice(end);
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome };

@@ -1,5 +1,5 @@
 const core = require('./inline-core.cjs');
-function create(threadId, finish, stop = () => {}) {
+function create(threadId, finish, stop = () => {}, parse = core.parse) {
   const messages = new Map(), sizes = new Map(); let turnId, settled = false, total = 0;
   const fail = error => { if (settled) return; settled = true; finish.reject(error); stop(); };
   const put = (id, text) => {
@@ -20,7 +20,7 @@ function create(threadId, finish, stop = () => {}) {
     if (method === 'item/completed' && p.item?.type === 'agentMessage' && typeof p.item.id === 'string' && typeof p.item.text === 'string') put(p.item.id, p.item.text);
     if (method === 'turn/completed') {
       if (p.turn?.status !== 'completed') { fail(new Error(typeof p.turn?.error?.message === 'string' ? p.turn.error.message : '代码改写未完成')); return; }
-      try { const result = core.parse([...messages.values()].at(-1) || ''); settled = true; finish.resolve(result); } catch (error) { fail(error); }
+      try { const result = parse([...messages.values()].at(-1) || ''); settled = true; finish.resolve(result); } catch (error) { fail(error); }
     }
     if (method === 'error' && !p.willRetry) fail(new Error(typeof p.error?.message === 'string' ? p.error.message : '代码改写失败'));
   };
