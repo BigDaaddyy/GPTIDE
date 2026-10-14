@@ -23,15 +23,15 @@ function install(vscode, context, root, currentChat) {
   const publish = status => {
     if (!panel) return;
     const chat = chatNow(), config = vscode.workspace.getConfiguration('gptide');
-    const fields = Object.entries(labels).map(([key, label]) => { const field = schema[key], inspected = config.inspect(key) || {}; return { key, label, type: field.type, enum: field.enum, minimum: field.minimum, maximum: field.maximum, value: config.get(key, field.default), source: inspected.workspaceFolderValue !== undefined ? '项目文件夹' : inspected.workspaceValue !== undefined ? '项目' : inspected.globalValue !== undefined ? '用户' : '默认', hint: field.description }; });
+    const fields = Object.entries(labels).map(([key, label]) => { const field = schema[key], inspected = config.inspect(key) || {}, userValue = inspected.globalValue ?? field.default; return { key, label, type: field.type, enum: field.enum, minimum: field.minimum, maximum: field.maximum, value: config.get(key, field.default), effectiveValue: config.get(key, field.default), userValue, projectValue: inspected.workspaceValue ?? userValue, source: inspected.workspaceFolderValue !== undefined ? '项目文件夹' : inspected.workspaceValue !== undefined ? '项目' : inspected.globalValue !== undefined ? '用户' : '默认', hint: field.description }; });
     panel.webview.postMessage({ type: 'state', fields, project: chat?.project || '', projectKey: chat?.projectKey, contextAvailable: !!chat?.fixedContext, context: chat?.fixedContext?.state || {}, effective: effective(chat), ...(status !== undefined ? { status } : {}) });
   };
   context.subscriptions.push(vscode.commands.registerCommand('gptide.settings', async () => {
     if (panel) { panel.reveal(); publish(); return; }
     panel = vscode.window.createWebviewPanel('gptide.settings', 'GptIDE 配置', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
     const own = panel, nonce = require('node:crypto').randomBytes(18).toString('hex');
-    panel.webview.html = fs.readFileSync(path.join(__dirname, 'settings-panel.html'), 'utf8').replaceAll('__NONCE__', nonce);
-    const changed = vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('gptide')) publish(); });
+    panel.webview.html = fs.readFileSync(path.join(__dirname, 'settings-panel.html'), 'utf8').replace('__SCRIPT__', () => fs.readFileSync(path.join(__dirname, 'settings-panel.js'), 'utf8')).replaceAll('__NONCE__', nonce);
+    const changed = vscode.workspace.onDidChangeConfiguration(event => { if (!writing && event.affectsConfiguration('gptide')) publish(); });
     const closed = vscode.workspace.onDidChangeWorkspaceFolders(() => own.dispose());
     own.onDidDispose(() => { changed.dispose(); closed.dispose(); if (panel === own) panel = null; });
     own.webview.onDidReceiveMessage(async message => {
@@ -45,11 +45,11 @@ function install(vscode, context, root, currentChat) {
           if (message.scope === 'project' && (!chat || message.projectKey !== chat.projectKey)) throw new Error('项目已切换');
           const value = message.reset ? undefined : validateSetting(message.key, message.value);
           writing = true; try { await vscode.workspace.getConfiguration('gptide').update(message.key, value, message.scope === 'project' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global); } finally { writing = false; }
-          if (panel === own) publish('已保存'); return;
+          if (panel === own) { own.webview.postMessage({ type: 'settingSaved', key: message.key, scope: message.scope }); publish('已保存'); } return;
         }
         if (message.type === 'context' || message.type === 'choose') {
           if (!chat || !chat.fixedContext || message.projectKey !== chat.projectKey) throw new Error('当前项目固定上下文不可用');
-          if (chat.busy || chat.reviewBusy || chat.inlineBusy) throw new Error('请先完成当前任务再修改固定上下文');
+          if (chat.actionLocked?.() || chat.busy || chat.reviewBusy || chat.inlineBusy || chat.inlinePromptBusy || chat.loginPending) throw new Error('请先完成当前任务或登录再修改固定上下文');
           if (message.type === 'context') {
             chat.fixedContext.save({ files: message.files, excluded: message.excluded, rules: message.rules }); chat.contextWarning = undefined; chat.post();
             own.webview.postMessage({ type: 'contextSaved', editVersion: message.editVersion }); publish('项目上下文已保存'); return;

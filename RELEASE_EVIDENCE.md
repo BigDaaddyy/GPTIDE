@@ -1,6 +1,6 @@
 # 1.0 验收证据索引
 
-当前基线：0.28.0。2026-10-14 完整源码回归 123/123 通过；0.27 的离线 UI/原生验收 16/16 通过，0.28 修改后网页与原生离线窗口复核 3/3 通过。运行报告分别位于本机 `downloads/acceptance/1791960623056-35112/`、`downloads/acceptance/1791961217621-30968/`，不提交私人运行数据。
+当前基线：0.29.0。2026-10-14 完整源码回归 123/123 通过；0.27 的离线 UI/原生验收 16/16 通过，0.28 修改后网页与原生离线窗口复核 3/3 通过；0.29 网页与实际配置窗口复核 4/4 通过。报告位于本机 `downloads/acceptance/1791960623056-35112/`、`1791961217621-30968/`、`1791961894026-12388/`，不提交私人运行数据。
 
 可复用命令：`npm test`、`npm run check`、`npm run build`、`npm run verify:runtime`、`npm run acceptance`。Playwright 运行环境按 README 配置；验收只启动自己的 Profile，用户目录及原生共享目录均隔离。
 
@@ -19,6 +19,7 @@
 - F11：`test/review.test.cjs`、`test/checkpoints.test.cjs`；原生 `checkpoints`。改动捕获、不可读/超限/符号链接处理、归属、损坏内容、后续编辑拒绝覆盖及撤销/重做。
 - F12：`test/conversation.test.cjs`、`test/history.test.cjs`；网页 `messages`。2000 消息分页/搜索、增量缺口请求、DOM 稳定、完整公开 Markdown 导出。
 - F13：`test/settings-panel.test.cjs`、`test/usage.test.cjs`、`test/usage-ui.test.cjs`；原生 `settings`、`offline`。配置范围/来源/重置、用量未知/过期、诊断字段不包含认证秘密。
+- 0.29 增加 `settings-usability`，核对范围各自值与生效值、外部刷新输入与焦点不丢、保存中所有配置控件锁定、明确确认释放及旧上下文确认不覆盖新输入。
 - F14：`test/import-config.test.cjs`、`test/import-ui.test.cjs`、`test/vscode-import.test.cjs`；原生 `import`。设置冲突/备份、取消、插件流式打包，以及真实安装器接受 UTF8 文件和主题清单。
 - F15：`test/storage.test.cjs`、`test/drafts.test.cjs`、`test/send-lifecycle.test.cjs`；原生 `drafts`、`recovery`。备份/损坏保留/并发冲突及只取回草稿、不重放任务。
 
