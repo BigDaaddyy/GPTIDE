@@ -200,7 +200,7 @@ function render(s) {
   const chat = s.chats.find(c => c.id === s.activeId);
   el('project').textContent = s.project ? s.project.split(/[\\/]/).pop() : '打开文件夹'; el('project').title = s.project;
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
-  el('connection').classList.toggle('connected', ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type)); el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
+  el('connection').classList.toggle('connected', s.connected === true); el('connection').title = s.loginPending ? '等待 ChatGPT 登录' : s.connected ? 'ChatGPT 已连接' : '未连接'; el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
   el('login').textContent = s.loginPending ? '等待 ChatGPT 登录…' : ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type) ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
   el('login').disabled = !!s.operationLocked;
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';

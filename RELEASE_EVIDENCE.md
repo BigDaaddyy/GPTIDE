@@ -1,6 +1,6 @@
 # 1.0 验收证据索引
 
-当前基线：0.27.0。2026-10-14 完整源码回归 117/117 通过；离线 UI/原生验收 16/16 通过。原始运行报告与截图存于本机 `downloads/acceptance/1791960623056-35112/`，不提交私人运行数据。
+当前基线：0.28.0。2026-10-14 完整源码回归 123/123 通过；0.27 的离线 UI/原生验收 16/16 通过，0.28 修改后网页与原生离线窗口复核 3/3 通过。运行报告分别位于本机 `downloads/acceptance/1791960623056-35112/`、`downloads/acceptance/1791961217621-30968/`，不提交私人运行数据。
 
 可复用命令：`npm test`、`npm run check`、`npm run build`、`npm run verify:runtime`、`npm run acceptance`。Playwright 运行环境按 README 配置；验收只启动自己的 Profile，用户目录及原生共享目录均隔离。
 
@@ -8,8 +8,10 @@
 
 - F01–F02：`test/project-scope.test.cjs`、`test/send-lifecycle.test.cjs`；原生 `home`、`isolation`、`drafts`。验证无项目/多根无输入，不同项目历史、草稿、队列、任务不串；异步项目失效取消旧操作。
 - F03：`test/cursor.test.cjs` 核对现代/旧 SQLite、完整根目录、多根排除、WAL 快照及原文件不变；`test/send-lifecycle.test.cjs` 验证 Cursor 背景迁移与失败重试。
+- 当前本机 Cursor 的副本结构已核对，包含 ItemTable/cursorDiskKV/composerHeaders，现代列与解析器兼容；WorkTime 匹配到 4 条且无警告。检查不输出用户聊天内容，SQLite 只在副本运行。
 - F04：`test/history.test.cjs`、`test/conversation-branch.test.cjs`、`test/send-lifecycle.test.cjs`；原生 `branches`、`drafts`、`isolation`。改名/删除在输入对话框返回后再次校验任务、项目和当前对话。
 - F05：`test/account.test.cjs`、`test/account-login.test.cjs`、`test/login-session.test.cjs`、`test/bridge.test.cjs`、`test/send-lifecycle.test.cjs`；真实 CLI 离线导出登录协议结构核对 loginId。会员认证与模型请求是模拟后端证据，不是在线端到端证明。
+- `test/model-catalog.test.cjs` 及真实 CLI 离线模型结构核对，补齐分页、隐藏过滤、去重、元数据/游标异常、过期连接及推理强度；集成测试核对第二页首选模型、异常不覆盖旧状态及无模型不启动任务。
 - F06：`test/send-lifecycle.test.cjs`、`test/request-input.test.cjs`、`test/tasklog.test.cjs`、`test/markdown.test.cjs`；网页 `messages` 及原生 `offline`。验证发送、停止、早/晚事件、授权、取消、日志及公开文本渲染。
 - F07–F08：`test/context.test.cjs`、`test/project-context.test.cjs`、`test/send-lifecycle.test.cjs`；原生 `settings`。目录范围、读取预算、选区、固定文件/规则、排除和更新后读取。
 - F09：`test/message-queue.test.cjs`、`test/send-lifecycle.test.cjs`；网页 `messages`、原生 `queue`、`recovery`。入队确认、连续 Enter、下一草稿保留、排序/编辑/删除、失败与重开暂停。
@@ -30,5 +32,4 @@
 
 ## 尚待完成
 
-- 模型列表的分页与异常响应保护需要补齐并回归。
 - 1.0 发布前重新核对当前版本的源码检查、运行包、CI 和本地/远端一致性；版本门槛不能由旧版本的通过记录代替。

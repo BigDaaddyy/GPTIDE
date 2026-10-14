@@ -72,6 +72,17 @@ test('stale account refresh errors cannot overwrite a new connection', async () 
   fail(new Error('old failure')); await old;
   await assert.rejects(chat.refreshAccount(), /current failure/);
 });
+
+test('account refresh selects a model on a later page and retains prior state on invalid catalog', async () => {
+  const chat=fixture();chat.bridge={call:async(method,params)=>method==='account/read'?{account:{type:'chatgpt',planType:'plus'}}:params.cursor?{data:[{model:'gpt-6.1-sol',defaultReasoningEffort:'ultra',supportedReasoningEfforts:[{reasoningEffort:'ultra'}]}]}:{data:[{model:'old',isDefault:true}],nextCursor:'next'}};
+  await chat.refreshAccount();assert.equal(chat.model,'gpt-6.1-sol');assert.equal(chat.effort,'ultra');assert.equal(chat.models.length,2);
+  chat.bridge={call:async method=>method==='account/read'?{account:{type:'chatgpt',planType:'new'}}:{data:{invalid:true}}};
+  await assert.rejects(chat.refreshAccount(),/模型列表响应无效/);assert.equal(chat.account.plan,'plus');assert.equal(chat.model,'gpt-6.1-sol');
+});
+test('empty official model catalog rejects before issuing a task and retains attempted instruction',async()=>{
+  const chat=fixture();chat.models=[];chat.connect=async()=>({call:()=>{throw Error('No task may start');}});
+  await assert.rejects(chat.send('saved attempt','ask'),/没有可用模型/);assert.equal(chat.busy,false);assert.equal(chat.chats[0].lastRequest,'saved attempt');assert.equal(chat.chats[0].lastOutcome,'failed');
+});
 test('file discovery cannot open a picker after a project closes or expose foreign files', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-attach-')), file = path.join(root, 'a.js'); fs.writeFileSync(file, 'QA file');
   const saved = { find: vscode.workspace.findFiles, relative: vscode.workspace.asRelativePath, pick: vscode.window.showQuickPick };

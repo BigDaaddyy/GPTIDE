@@ -239,7 +239,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), operationLocked: this.actionLocked(), loginPending: !!this.loginPending, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, added: c.added ?? (c.after || '').split('\n').length, removed: c.removed ?? (c.before || '').split('\n').length })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -449,15 +449,15 @@ class Chat {
       if (result.account && !['chatgpt', 'chatgptAuthTokens'].includes(result.account.type)) {
         this.account = { type: result.account.type, plan: result.account.planType }; this.status = '请使用 ChatGPT 登录；此软件不使用 API Key'; this.models = []; this.post(); return;
       }
-      models = await bridge.call('model/list', { limit: 50, includeHidden: false });
+      models = await require('./model-catalog.cjs').read(bridge, isCurrent);
       if (!isCurrent()) return;
     } catch (error) { if (isCurrent()) throw error; return; }
     this.account = result.account ? { type: result.account.type, plan: result.account.planType } : null;
-    this.models = models.data || [];
+    this.models = models || [];
     if (this.models.length && !this.models.some(m => m.model === this.model)) this.model = this.models.find(m => m.model === 'gpt-6.1-sol')?.model || this.models.find(m => m.isDefault)?.model || this.models[0].model;
     const current = this.models.find(m => m.model === this.model);
-    if (!current?.supportedReasoningEfforts?.some(e => e.reasoningEffort === this.effort)) this.effort = current?.defaultReasoningEffort || 'medium';
-    this.status = this.account ? `ChatGPT ${(this.account.plan || '').toUpperCase()} 已连接` : '请使用 ChatGPT 登录'; this.post();
+    this.effort = require('./model-catalog.cjs').effort(current, this.effort);
+    this.status = this.account ? this.models.length ? `ChatGPT ${(this.account.plan || '').toUpperCase()} 已连接` : 'ChatGPT 已连接，但没有可用模型；请重新连接' : '请使用 ChatGPT 登录'; this.post();
   }
   async reconnect() {
     await this.ready;
@@ -522,6 +522,7 @@ class Chat {
       if (this.invalidated || submittedChatId !== this.activeId) throw new Error('项目或对话已切换，已取消发送');
       if (this.cancelPendingSend) throw new Error('已取消发送');
       if (!this.account || !['chatgpt', 'chatgptAuthTokens'].includes(this.account.type)) throw new Error('请先使用 ChatGPT 账号登录');
+      if (Array.isArray(this.models) && !this.models.length) throw new Error('没有可用模型，请重新连接后再发送');
     } catch (error) { if (!isCurrent()) return; this.busy = false; this.pauseQueue(); const failure = this.cancelPendingSend ? new Error('已取消发送') : error; this.status = failure.message; this.post(); throw failure; }
     this.mode = mode; this.busy = true; this.status = '正在思考'; this.activity = ''; this.post();
     try {
@@ -699,7 +700,7 @@ class Chat {
         if (msg.type === 'new') { if (!this.actionLocked() && !this.storageBlocked) this.newChat(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'branch') { if (!this.branchChat(msg.id, msg.index, msg.revision)) { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'closeTab') { if (!this.actionLocked()) this.closeTab(msg.id, msg.draft); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
-        if (msg.type === 'model' && !this.actionLocked() && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); if (!model.supportedReasoningEfforts.some(e => e.reasoningEffort === this.effort)) this.effort = model.defaultReasoningEffort; this.save(); this.post(); }
+        if (msg.type === 'model' && !this.actionLocked() && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); this.effort = require('./model-catalog.cjs').effort(model, this.effort); this.save(); this.post(); }
         if (msg.type === 'effort' && !this.actionLocked() && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
         if (msg.type === 'attach') await this.attachFiles();
         if (msg.type === 'attachCurrent') await this.attachFiles(true);
