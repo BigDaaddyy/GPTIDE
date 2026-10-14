@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "0.29.0",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -236,7 +236,7 @@
         },
         "gptide.connection.autoConnect": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "打开项目后自动连接；关闭后仅发送或登录时连接。"
         },
         "gptide.connection.timeoutSeconds": {

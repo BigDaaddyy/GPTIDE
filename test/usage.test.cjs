@@ -27,6 +27,11 @@ test('preferences reject invalid enums and bound limits', () => {
   const result = preferences.values({ get: (key, fallback) => data[key] ?? fallback });
   assert.equal(result.autoConnect, false); assert.equal(result.approvalPolicy, 'on-request'); assert.equal(result.rpcTimeout, 10000); assert.equal(result.importLimit, 300000); assert.equal(result.networkAccess, false);
 });
+test('new projects load offline unless automatic connection is explicitly enabled',()=>{
+  assert.equal(preferences.values({get:(_key,fallback)=>fallback}).autoConnect,false);
+  assert.equal(preferences.values({get:(key,fallback)=>key==='connection.autoConnect'?true:fallback}).autoConnect,true);
+  assert.equal(require('../builtin/package.json').contributes.configuration.properties['gptide.connection.autoConnect'].default,false);
+});
 
 test('expired and old records never imply current available quota or invented reset', () => {
   const now = Date.parse('2026-10-13T14:00:00Z'), record = usage.normalize({ primary: { usedPercent: 20, resetsAt: (now + 60000) / 1000 }, secondary: { usedPercent: 30, windowDurationMins: Infinity, resetsAt: NaN } }, new Date(now).toISOString(), 'fixture');

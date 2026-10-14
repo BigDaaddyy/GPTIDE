@@ -3,7 +3,7 @@ const { _electron } = require('../acceptance-env.cjs').playwright;
 (async () => {
   const root = require('../acceptance-env.cjs').root, user = path.join(require('../acceptance-env.cjs').artifacts, 'offline-check-user'), project = path.join(require('../acceptance-env.cjs').artifacts, 'offline-qa-project');
   fs.mkdirSync(project, { recursive: true }); fs.mkdirSync(path.join(user, 'User'), { recursive: true });
-  fs.writeFileSync(path.join(user, 'User/settings.json'), JSON.stringify({ 'workbench.colorTheme': 'Default Light Modern', 'workbench.startupEditor': 'none', 'window.restoreWindows': 'none', 'security.workspace.trust.enabled': false, 'gptide.connection.autoConnect': false, 'gptide.chat.submitKey': 'ctrlEnter' }));
+  fs.writeFileSync(path.join(user, 'User/settings.json'), JSON.stringify({ 'workbench.colorTheme': 'Default Light Modern', 'workbench.startupEditor': 'none', 'window.restoreWindows': 'none', 'security.workspace.trust.enabled': false, 'gptide.codexPath': path.join(user,'disabled-codex.exe'), 'gptide.chat.submitKey': 'ctrlEnter' }));
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const app = await _electron.launch({ executablePath: path.join(root, 'app/VSCodium.exe'), args: ['--user-data-dir', user, '--extensions-dir', path.join(user, 'extensions'), '--skip-welcome', project], env });
   try {
