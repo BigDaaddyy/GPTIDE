@@ -6,7 +6,7 @@ let invalidated = false;
 const drafts = previous.drafts || {}; let draftKey, submittedDraft, submittedSendId, submittedInputRevision;
 const sendPrefix = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); let sendSequence = 0, inputRevision = 0;
 const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0, pendingFocusChat;
-let pendingTabChange = false, pendingSend = false;
+let pendingTabChange = false, pendingSend = false, pendingQueue = false;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
@@ -48,6 +48,18 @@ function renderHistory() {
     const row = make('button', 'history-row' + (state.activeId === chat.id ? ' active' : '')); row.disabled = state.busy;
     row.append(make('span', 'name', chat.name), make('span', 'meta', (chat.hasDraft ? '草稿' : chat.branch ? '分支' : chat.source === 'cursor' ? 'Cursor' : 'GptIDE') + ` · ${chat.count} 条消息` + (chat.duplicates > 1 ? ` · ${chat.duplicates} 份合并` : '')));
     row.onclick = () => { flushDraft(); if (chat.id !== state.activeId) beginTabChange(); post('select', { id: chat.id }); el('history-panel').hidden = true; }; el('history-list').append(row);
+  }
+}
+function renderQueue(s) {
+  const queue = s.queue || []; el('queue-panel').hidden = !queue.length; el('queue-count').textContent = queue.length;
+  el('queue-status').textContent = s.queuePaused ? '已暂停' : '本轮完成后继续'; el('queue-pause').textContent = s.queuePaused ? '继续队列' : '暂停队列'; el('queue-pause').disabled = !!s.storageBlocked;
+  el('queue-list').replaceChildren();
+  for (const [index, item] of queue.entries()) {
+    const row = make('div', 'queue-row'), text = make('span', 'queue-text', item.text.slice(0, 160)); text.title = item.text.slice(0, 1000); row.append(make('span', 'badge', item.mode), text);
+    if (item.status !== 'pending') { const status = make('span', 'queue-item-status', item.status === 'starting' ? '发送中' : '未确认'); status.title = item.error || ''; row.append(status); }
+    const actions = [['编辑','queueEdit'],['↑','queueMove',-1],['↓','queueMove',1],['×','queueRemove']]; if (item.status === 'failed') actions.unshift(['重试','queueRetry']);
+    for (const [label, type, direction] of actions) { const button = make('button', 'text-button', label); button.title = type === 'queueRetry' ? '检查对话后重试，避免重复执行' : label; button.disabled = s.storageBlocked || item.status === 'starting' || direction === -1 && !index || direction === 1 && index === queue.length - 1; button.onclick = () => post(type, { id: item.id, direction }); row.append(button); }
+    el('queue-list').append(row);
   }
 }
 function renderMessages(s) {
@@ -156,7 +168,7 @@ function renderTasks(s) {
   for (const [id, row] of taskRows) if (!keys.has(id)) { row.node.remove(); taskRows.delete(id); }
 }
 function render(s) {
-  if (s.busy && !s.loadingScope) pendingSend = false;
+  if (s.busy && !s.loadingScope && !pendingQueue) pendingSend = false;
   const tabs = JSON.stringify([s.openChatIds, s.activeId, s.busy, s.reviewBusy, s.chats.map(c => [c.id, c.name])]);
   if (tabs !== tabsSignature) {
     tabsSignature = tabs; el('chat-tabs').replaceChildren();
@@ -193,9 +205,12 @@ function render(s) {
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
-  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'mode', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
+  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
-  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked || pendingSend;
+  el('send').disabled = !!s.reviewBusy || !!s.storageBlocked || (pendingSend && !pendingQueue);
+  el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
+  el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
+  renderQueue(s);
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
     optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.preferences?.autoConnect === false ? '发送时加载模型' : '登录后加载模型', ''));
@@ -282,11 +297,11 @@ window.addEventListener('message', event => {
     if (data.history) { state.history = data.history; if (!el('history-panel').hidden) renderHistory(); }
     if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存';
   }
-  if (data.type === 'sent' && (data.clientSendId === undefined || data.clientSendId === submittedSendId)) {
+  if (['sent','queued'].includes(data.type) && (data.clientSendId === undefined || data.clientSendId === submittedSendId)) {
     if ((!data.id || data.id === draftKey) && inputRevision === submittedInputRevision && el('input').value === submittedDraft) el('input').value = '';
-    pendingSend = false; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; resizeInput(); flushDraft();
+    pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; resizeInput(); flushDraft();
   }
-  if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; }
+  if (data.type === 'sendRejected' && data.clientSendId === submittedSendId) { pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; el('send').disabled = !!state.reviewBusy || !!state.storageBlocked; }
 });
 el('input').value = previous.draft || ''; if (previous.mode) el('mode').value = previous.mode;
 el('input').addEventListener('input', () => { inputRevision++; quickDismissed = undefined; resizeInput(); scheduleDraft(); updateQuickActions(); });
@@ -301,7 +316,7 @@ el('input').onkeydown = e => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuickActions(true); return; }
   }
   const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey;
-  if (e.key === 'Enter' && sendKey && !e.shiftKey) { e.preventDefault(); if (!state.busy) el('send').click(); }
+  if (e.key === 'Enter' && sendKey && !e.shiftKey) { e.preventDefault(); if (state.busy) el('enqueue').click(); else el('send').click(); }
 };
 el('send').onclick = () => {
   if (state.busy) { post('stop'); return; } if (pendingSend) return;
@@ -309,6 +324,12 @@ el('send').onclick = () => {
   if (parsed && matchingActions({ kind: 'command', query: parsed.action.id }, state).some(action => action.id === parsed.action.id)) { performQuickAction(parsed.action, parsed.remainder); if (!parsed.action.mode || !el('input').value.trim()) return; }
   const text = el('input').value.trim(); if (text) { flushDraft(); closeQuickActions(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('send', { text, mode: el('mode').value, clientSendId: submittedSendId }); }
 };
+el('enqueue').onclick = () => {
+  if (pendingSend || !state.busy || state.loadingScope || state.storageBlocked || state.source === 'cursor') return;
+  const text = el('input').value.trim(); if (!text) return;
+  flushDraft(); closeQuickActions(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
+};
+el('queue-pause').onclick = () => post('queuePause');
 el('more').onclick = () => { el('menu').hidden = !el('menu').hidden; };
 el('history').onclick = () => { el('history-panel').hidden = !el('history-panel').hidden; renderHistory(); if (!el('history-panel').hidden) el('history-search').focus(); };
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };

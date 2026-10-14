@@ -41,3 +41,5 @@ body.vscode-high-contrast,body.vscode-high-contrast-light{--floating-border:var(
 .role .branch-message{opacity:0;font-size:14px;padding:0 2px;color:var(--muted)}.message:hover .branch-message,.branch-message:focus{opacity:1}.branch-message:disabled{opacity:0}.user .role .branch-message{font-size:12px}
 
 .branch-source{font-size:10px;color:var(--muted);padding:2px 0 8px;overflow-wrap:anywhere}
+
+.queue-panel{font-size:11px;border-top:1px solid var(--border);padding:5px 2px;margin-bottom:5px}.queue-controls{display:flex;gap:6px;align-items:center;color:var(--muted);padding:5px 0}.queue-row{display:flex;align-items:center;gap:5px;padding:5px 0;border-top:1px solid var(--border)}.queue-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.queue-row button{flex-shrink:0;font-size:10px}.queue-item-status{font-size:9px;color:var(--muted)}#queue-list{max-height:145px;overflow:auto}

@@ -14,6 +14,8 @@ function chats(value) {
     if (chat.backgroundPending && !Number.isSafeInteger(chat.backgroundCount)) invalid('背景消息数量');
     optional(chat, 'branch', value => object(value) && string(value.id) && string(value.name) && Number.isSafeInteger(value.messageIndex) && value.messageIndex >= 0 && value.messageIndex < (chat.messages?.length || 0));
     if (chat.branch && chat.backgroundCount !== chat.branch.messageIndex + 1) invalid('分支背景范围');
+    optional(chat, 'queuePaused', value => typeof value === 'boolean');
+    optional(chat, 'queue', value => require('./message-queue.cjs').validate(value, chat.id, chat.projectKey));
     optional(chat, 'messages', list => Array.isArray(list) && list.every(message => object(message) && (message.text === undefined || string(message.text)) && (message.role === undefined || string(message.role)) && (message.attachments === undefined || strings(message.attachments))));
     optional(chat, 'tasks', list => Array.isArray(list) && list.every(task => object(task) && (task.files === undefined || strings(task.files)) && ['id', 'turnId', 'kind', 'title', 'status', 'output'].every(field => task[field] === undefined || string(task[field]))));
     optional(chat, 'changes', list => Array.isArray(list) && list.every(change => object(change) && ['path', 'relative', 'status'].every(field => change[field] === undefined || string(change[field])) && ['before', 'after'].every(field => change[field] === undefined || change[field] === null || string(change[field]))));

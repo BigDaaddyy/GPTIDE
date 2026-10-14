@@ -112,6 +112,25 @@ test('preparing a send locks its conversation and ignores duplicate send', async
   finishConnect({ call: async method => { calls++; assert.equal(method, 'turn/start'); return { turn: { id: 'turn' } }; } });
   await pending; assert.equal(calls, 1); assert.equal(chat.messages.length, 1); assert.equal(chat.messages[0].text, 'submitted');
 });
+test('queued send uses captured references without clearing next draft or emitting an unrelated input acknowledgment', async () => {
+  const chat = fixture(), notifications = []; chat.busy = true; chat.attachments = [{ id: 'queued-file', label: 'a.js', path: 'QA/a.js', text: 'snapshot' }]; chat.view.webview.postMessage = value => notifications.push(value);
+  await chat.enqueue('queued task', 'ask', 'queue-client'); assert.equal(chat.chats[0].queue.length, 1); assert.equal(chat.attachments.length, 0); assert.equal(notifications.find(value => value.type === 'queued').clientSendId, 'queue-client');
+  chat.busy = false; chat.chats[0].draft = 'next draft'; chat.attachments = [{ id: 'next-file', label: 'b.js', text: 'later' }]; let input;
+  chat.connect = async () => ({ call: async (method, params) => { input = params.input[0].text; return { turn: { id: 'queued-turn' } }; } });
+  await chat.dispatchQueue(); assert.ok(input.includes('snapshot')); assert.ok(!input.includes('later')); assert.equal(chat.chats[0].draft, 'next draft'); assert.equal(chat.chats[0].queue.length, 0); assert.equal(chat.attachments[0].id, 'next-file'); assert.equal(notifications.filter(value => value.type === 'sent').length, 0);
+});
+test('queue failure pauses without automatic retry and pause stops subsequent dispatch', async () => {
+  const chat = fixture(); chat.busy = true; await chat.enqueue('next task', 'ask'); chat.busy = false;
+  let calls = 0; chat.connect = async () => { calls++; throw new Error('QA disconnected'); };
+  await chat.dispatchQueue(); assert.equal(chat.chats[0].queuePaused, true); assert.equal(chat.chats[0].queue[0].status, 'failed'); await chat.dispatchQueue(); assert.equal(calls, 1);
+  await chat.queueAction('queueRemove', chat.chats[0].queue[0].id); assert.equal(chat.chats[0].queue.length, 0); clearTimeout(chat.queueTimer);
+});
+test('successful completion schedules the next queued instruction only for the active unpaused conversation', async () => {
+  const chat = fixture(); chat.busy = true; chat.turnId = 'old'; chat.tasks = []; await chat.enqueue('follow-up', 'ask'); let calls = 0;
+  chat.connect = async () => ({ call: async () => { calls++; return { turn: { id: 'next' } }; } });
+  chat.finishTurn({ id: 'old', status: 'completed' }); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(calls, 1); assert.equal(chat.turnId, 'next'); assert.equal(chat.chats[0].queue.length, 0);
+  chat.chats[0].queuePaused = true; await chat.enqueue('stay pending', 'ask'); chat.finishTurn({ id: 'next', status: 'completed' }); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(calls, 1); assert.equal(chat.chats[0].queue.length, 1);
+});
 test('branch starts an independent thread, sends only prefix background once and preserves origin', async () => {
   const chat = fixture(); chat.streamRevision = 7; chat.chatAttachments = new Map(); chat.chats[0].messages.push({ role: 'user', text: 'prefix' }, { role: 'assistant', text: 'answer' }, { role: 'user', text: 'later' });
   const origin = chat.chats[0]; assert.equal(chat.branchChat('one', 1, 6), false); assert.equal(chat.branchChat('one', 1, 7), true); const branch = chat.chats[0]; assert.notEqual(branch.id, 'one'); assert.equal(chat.threadId, undefined); assert.equal(origin.messages.length, 3);
