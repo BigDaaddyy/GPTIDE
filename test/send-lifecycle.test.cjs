@@ -449,9 +449,21 @@ test('rename and delete target chosen history without switching current chat',as
  const chat=fixture(),other={id:'two',projectKey:'project',name:'old',source:'cursor',messages:[]};chat.chats.push(other);chat.hiddenCursorIds=[];const saved={input:vscode.window.showInputBox,warning:vscode.window.showWarningMessage};
  try{vscode.window.showInputBox=async()=> 'Renamed';await chat.renameChat('two');assert.equal(other.name,'Renamed');assert.equal(chat.cursorChatMetadata.two.name,'Renamed');assert.equal(chat.activeId,'one');vscode.window.showWarningMessage=async()=> '确认';await chat.deleteChat('two');assert.equal(chat.activeId,'one');assert.equal(chat.chats.length,1);assert.deepEqual(chat.hiddenCursorIds,['two']);assert.equal(chat.cursorChatMetadata.two,undefined);}finally{vscode.window.showInputBox=saved.input;vscode.window.showWarningMessage=saved.warning;}
 });
-test('code review Keep persists and Undo chooses a file without bulk overwriting changes',async()=>{
- const chat=fixture();chat.streamRevision=3;chat.activeCheckpointId='cp';chat.changes=[{path:'first',relative:'first',status:'pending'},{path:'second',relative:'second',status:'pending'}];await chat.reviewAction('keep','one','cp',2);assert.equal(chat.changes[0].status,'pending');await chat.reviewAction('keep','one','cp',3);assert.ok(chat.changes.every(c=>c.status==='accepted'));
- const prior=vscode.window.showQuickPick;let undone;chat.revert=async file=>{undone=file;};try{vscode.window.showQuickPick=async items=>items[1];await chat.reviewAction('undo','one','cp',3);assert.equal(undone,'second');vscode.window.showQuickPick=async items=>{chat.activeId='different';return items[0];};undone=undefined;await chat.reviewAction('undo','one','cp',3);assert.equal(undone,undefined);}finally{vscode.window.showQuickPick=prior;}
+test('code review Keep persists and group Undo checks every file before writing',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-group-undo-'));
+ const prior={fs:vscode.workspace.fs,documents:vscode.workspace.textDocuments,uri:vscode.Uri};
+ try{
+  const chat=fixture();chat.project=root;chat.streamRevision=3;chat.activeCheckpointId='cp';
+  const first=path.join(root,'a.txt'),second=path.join(root,'b.txt');
+  chat.changes=[{path:first,relative:'a.txt',before:'A',after:'B',status:'pending'},{path:second,relative:'b.txt',before:null,after:'new',status:'pending'}];
+  fs.writeFileSync(first,'B');fs.writeFileSync(second,'manual');vscode.workspace.textDocuments=[];vscode.Uri={file:fsPath=>({fsPath,scheme:'file'})};
+  let writes=0;vscode.workspace.fs={writeFile:async(uri,data)=>{writes++;assert.equal(chat.reviewBusy,true);fs.writeFileSync(uri.fsPath,data);},delete:async uri=>{writes++;fs.unlinkSync(uri.fsPath);}};
+  await chat.reviewAction('undo','one','cp',2);assert.equal(writes,0);
+  await assert.rejects(chat.reviewAction('undo','one','cp',3),/后续修改/);assert.equal(writes,0);assert.equal(fs.readFileSync(first,'utf8'),'B');
+  fs.writeFileSync(second,'new');vscode.workspace.textDocuments=[{uri:vscode.Uri.file(second),isDirty:true}];await assert.rejects(chat.reviewAction('undo','one','cp',3),/未保存/);assert.equal(writes,0);
+  vscode.workspace.textDocuments=[];await chat.reviewAction('undo','one','cp',3);assert.equal(writes,2);assert.equal(fs.readFileSync(first,'utf8'),'A');assert.equal(fs.existsSync(second),false);assert.ok(chat.changes.every(c=>c.status==='reverted'));assert.equal(chat.reviewBusy,false);
+  chat.changes.forEach(c=>c.status='pending');chat.save=()=>false;await chat.reviewAction('keep','one','cp',3);assert.ok(chat.changes.every(c=>c.status==='pending'));chat.save=()=>true;await chat.reviewAction('keep','one','cp',3);assert.ok(chat.changes.every(c=>c.status==='accepted'));await chat.reviewAction('undo','one','cp',3);assert.equal(writes,2);
+ }finally{vscode.workspace.fs=prior.fs;vscode.workspace.textDocuments=prior.documents;vscode.Uri=prior.uri;fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test('simple file decisions reject stale scope and preserve pending state after failed acceptance',async()=>{

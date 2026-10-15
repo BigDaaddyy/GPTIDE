@@ -36,7 +36,7 @@ const { chromium } = require('../acceptance-env.cjs').playwright;
     await page.evaluate(s => window.dispatchEvent(new MessageEvent('message', { data: s })), reviewState);
     assert.equal(await page.locator('#checkpoint-select').count(),0);assert.equal(await page.locator('.review-counts').textContent(),'+1−1');
     await page.evaluate(s => window.dispatchEvent(new MessageEvent('message', { data: { ...s, reviewBusy: true } })), reviewState);
-    assert.ok(await page.getByRole('button',{name:'Reject a.txt',exact:false}).isDisabled()); assert.ok(await page.locator('#send').isDisabled()); assert.ok(await page.locator('#new').isDisabled());
+    assert.ok(await page.getByRole('button',{name:'Undo',exact:false}).isDisabled()); assert.ok(await page.locator('#send').isDisabled()); assert.ok(await page.locator('#new').isDisabled());
     await page.evaluate(s => window.dispatchEvent(new MessageEvent('message', { data: { ...s, changes: [{ ...s.changes[0], status: 'reverted' }] } })), reviewState);
     assert.equal(await page.locator('.review-row').count(),0);assert.ok(await page.locator('#review').isHidden());
     const bounds = await page.locator('#review').evaluate(e => ({ width: e.scrollWidth, client: e.clientWidth })); assert.ok(bounds.width <= bounds.client + 1, JSON.stringify(bounds));

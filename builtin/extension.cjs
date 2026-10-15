@@ -163,12 +163,19 @@ class Chat {
   async reviewAction(action,id,checkpointId,revision){
     const valid=()=>!this.invalidated&&!this.storageBlocked&&!this.actionLocked()&&id===this.activeId&&checkpointId===(this.activeCheckpointId||null)&&revision===this.streamRevision;
     if(!valid())return;
-    const changes=(this.changes||[]).filter(c=>action==='keep'?c.status==='pending':['pending','accepted'].includes(c.status));
+    const changes=(this.changes||[]).filter(c=>c.status==='pending');
     if(action==='keep'){
-      for(const change of changes)this.changeStatus(change,'accepted');if(!this.save())for(const change of changes)this.changeStatus(change,'pending');this.post();
+      for(const change of changes)this.changeStatus(change,'accepted');if(!this.save())for(const change of changes)this.changeStatus(change,'pending');else this.status='已保留修改';this.post();
     }else if(action==='undo'&&changes.length){
-      const choice=changes.length===1?{change:changes[0]}:await vscode.window.showQuickPick(changes.map(change=>({label:change.relative,change})),{title:'Undo · 选择要撤销的文件'});
-      if(choice&&valid()&&this.changes.includes(choice.change))await this.revert(choice.change.path);
+      const restores=changes.map(change=>this.prepareRestore(change));
+      this.reviewBusy=true;this.post();
+      try{
+        for(const restore of restores){
+          if(this.invalidated||this.storageBlocked)throw new Error('项目或存储状态已改变，已停止撤销');
+          await this.applyRestore(restore);
+        }
+        this.status='已撤销修改';
+      }finally{this.reviewBusy=false;this.post();}
     }
   }
   async reviewDecision(msg){
@@ -396,18 +403,34 @@ class Chat {
     if (this.actionLocked() || this.invalidated) return;
     if (this.storageBlocked) throw new Error(this.historyWarning);
     const metadata = this.changes?.find(c => c.path === file); if (!metadata || (redo ? metadata.status !== 'reverted' : !['pending', 'accepted'].includes(metadata.status)) || !review.within(this.project, file)) return;
+    const restore=this.prepareRestore(metadata,redo);
+    this.reviewBusy = true; this.post();
+    try { await this.applyRestore(restore); }
+    finally { this.reviewBusy = false; this.post(); }
+  }
+  prepareRestore(metadata,redo=false){
+    const file=metadata.path;
+    if(!review.within(this.project,file))throw new Error('文件不属于当前项目');
     if (!vscode.workspace.isTrusted) throw new Error('请先信任项目以撤销文件修改');
-    const change = this.checkpointStore ? this.checkpointStore.materialize(metadata) : metadata, expected = redo ? change.before : change.after, target = redo ? change.after : change.before;
+    const change = this.checkpointStore ? this.checkpointStore.materialize(metadata) : metadata;
+    const restore={metadata,file,expected:redo?change.before:change.after,target:redo?change.after:change.before,redo};
+    this.checkRestore(restore);return restore;
+  }
+  checkRestore({file,expected}){
+    if(this.invalidated||!review.within(this.project,file))throw new Error('项目已改变，已停止撤销');
+    if(!vscode.workspace.isTrusted)throw new Error('请先信任项目以撤销文件修改');
     const sameFile = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() === path.resolve(file).toLowerCase() : path.resolve(value) === path.resolve(file);
     if (review.readText(file) !== expected || vscode.workspace.textDocuments.some(d => d.uri.scheme === 'file' && sameFile(d.uri.fsPath) && d.isDirty)) throw new Error('文件已有后续修改或未保存编辑，无法安全恢复。请先查看差异。');
-    this.reviewBusy = true; this.post();
-    try {
+  }
+  async applyRestore(restore){
+      this.checkRestore(restore);
+      const {file,target,metadata,redo}=restore;
       const uri = vscode.Uri.file(file);
       if (target === null) await vscode.workspace.fs.delete(uri, { recursive: false });
       else await vscode.workspace.fs.writeFile(uri, Buffer.from(target, 'utf8'));
       if (review.readText(file) !== target) throw new Error('恢复结果与检查点不一致，请检查文件');
-      this.changeStatus(metadata, redo ? 'pending' : 'reverted'); this.save();
-    } finally { this.reviewBusy = false; this.post(); }
+      this.changeStatus(metadata, redo ? 'pending' : 'reverted');
+      if(!this.save())throw new Error(this.historyWarning||'文件已恢复，但检查点状态保存失败');
   }
   async renameChat(id=this.activeId) {
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;

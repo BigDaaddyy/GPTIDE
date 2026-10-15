@@ -33,6 +33,8 @@
 
 ## 发布复核
 
+- 1.3.2：147 项源码回归、语法/构建/运行包验证通过。最终离线验收网页3项、原生历史与文件操作2项，合计5/5通过，报告 `downloads/acceptance/1792059271098-33028/report.json`。截图 `model-picker-260.png` / `model-picker-300.png` / `model-picker-390.png`、`compact-chat-300.png`、`review-expanded-300.png`；覆盖实际目录档位、方向键/Tab/Esc、运行锁、默认折叠、展开差异、批量预检及实际 Undo/Keep 和历史持久化。不连接真实模型。
+
 - 1.3.1：147 项源码测试、语法/构建/运行包验证通过。网页 3 项通过报告 `downloads/acceptance/1792058012810-35548/`；原生历史与文件处理 2 项通过报告 `downloads/acceptance/1792058111925-30124/`，最终最新轮次兼容、真实 Reject/Accept 和手动修改保护复核通过报告 `downloads/acceptance/1792058432989-35864/`。简化列表截图见 `downloads/acceptance/1792058222128-26416/compact-chat-300.png`。只显示待处理文件与真实增删行数；处理后隐藏。源代码管理仍负责复杂操作。未连接真实模型。
 
 - 1.3.0 最终（2026-10-15）：143 项源码回归、语法/构建/运行包校验通过。完整离线验收 20/21 通过，报告 `downloads/acceptance/1792055993141-14992/`；新增历史验收误把按钮开始禁用当作 Undo 完成，修正为等待“已撤销”后，补充验收通过，报告 `downloads/acceptance/1792056231578-22732/`。21 个场景均已有通过结果。新增 `history-review` 覆盖 Pin、Archive / 恢复、More 的 Rename / Delete、重启持久化、Code Review Keep / Undo / Redo 和原生前后差异。系统删除确认在独立测试进程模拟返回“确认”，其余交互在真实编辑器中执行；未连接模型。

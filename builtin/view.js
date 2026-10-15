@@ -9,6 +9,22 @@ const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0,
 let pendingTabChange = false, pendingSend = false, pendingQueue = false;
 let handledFocusId;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
+let reviewScope,reviewExpanded=false;
+const effortNames={minimal:'最轻',low:'低',medium:'中',high:'高',xhigh:'更高',max:'Max',ultra:'Ultra'};
+function renderEffort(){
+  const choices=Array.from(el('effort').options),index=Math.max(0,choices.findIndex(e=>e.value===el('effort').value));
+  el('effort-slider').max=String(Math.max(0,choices.length-1));el('effort-slider').value=String(index);
+  el('effort-slider').disabled=el('effort').disabled||choices.length<2;
+  el('effort-ticks').replaceChildren(...choices.map(()=>make('span')));
+  previewEffort();
+}
+function previewEffort(){
+  const option=el('effort').options[Number(el('effort-slider').value)],label=effortNames[option?.value]||option?.textContent||'默认';
+  el('effort-label').textContent=label;el('effort-slider').setAttribute('aria-valuetext',label);
+  Array.from(el('effort-ticks').children).forEach((tick,i)=>{tick.style.visibility=i===Number(el('effort-slider').value)?'hidden':'visible';tick.style.background=i<Number(el('effort-slider').value)?'#ffffff66':'#a7aab280';});
+  el('effort-slider').style.setProperty('--effort-fill',(Number(el('effort-slider').max)?100*Number(el('effort-slider').value)/Number(el('effort-slider').max):0)+'%');
+}
+function closeModel(focus=false){el('model-panel').hidden=true;el('model-toggle').setAttribute('aria-expanded','false');if(focus)el('model-toggle').focus();}
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
 const pendingCopies=new Map();let copySequence=0;
@@ -251,23 +267,29 @@ function render(s) {
   const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
     optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.model ? '默认 ' + s.model.replace(/^gpt-/i, '').replaceAll('-', ' ') : '发送时加载模型', s.model || ''));
-    for (const m of s.models) el('model').add(new Option((m.displayName || m.model).replace('GPT-', '').replaceAll('-', ' '), m.model)); el('model').value = s.model;
+    for (const m of s.models) el('model').add(new Option(m.displayName || m.model, m.model)); el('model').value = s.model;
     el('effort').replaceChildren(); const model = s.models.find(m => m.model === s.model), names = { minimal: '最轻', low: '轻量', medium: '均衡', high: '深入', xhigh: '更深入', max: 'Max', ultra: 'Ultra' };
     for (const e of model?.supportedReasoningEfforts || []) el('effort').add(new Option(names[e.reasoningEffort] || e.reasoningEffort, e.reasoningEffort)); el('effort').value = s.effort;
     if (!el('effort').options.length) { el('effort').add(new Option(names[s.effort] || '默认', s.effort || '')); el('effort').value = s.effort || ''; }
   }
   el('model').disabled ||= !s.models.length; el('model').title = s.models.length ? '选择模型' : '默认模型；连接后确认可用性';
   el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
+  el('model-label').textContent=s.models.find(m=>m.model===s.model)?.displayName||s.model||'选择模型';
+  el('model-toggle').disabled=el('model').disabled;renderEffort();
+  if(el('model-toggle').disabled)closeModel();
   if (!s.busy && s.mode) el('mode').value = previous.mode || s.mode;
   el('attachments').replaceChildren();
   el('settings').title=s.pinnedContext?.length?'项目固定引用：'+s.pinnedContext.join('、'):'会话与 Codex 配置';
   el('settings').textContent=s.pinnedContext?.length?'设置 · '+s.pinnedContext.length+' 项固定引用':'设置';
   for (const attachment of s.attachments || []) { const chip = make('span', 'file-chip', attachment.label), remove = make('button', '', '×'); remove.disabled = s.busy; remove.title = '移除引用'; remove.onclick = () => post('removeAttachment', { id: attachment.id }); chip.append(remove); el('attachments').append(chip); }
   const pending=(s.changes||[]).filter(change=>change.status==='pending'),signature=JSON.stringify([s.activeId,s.revision,s.activeCheckpointId,pending,s.operationLocked,s.busy,s.reviewBusy,s.storageBlocked]);
+  const scope=JSON.stringify([s.activeId,s.activeCheckpointId]);if(scope!==reviewScope){reviewScope=scope;reviewExpanded=false;}
+  el('review-files').hidden=!reviewExpanded;el('review-toggle').setAttribute('aria-expanded',String(reviewExpanded));el('review-arrow').textContent=reviewExpanded?'⌄':'›';
+  el('review-count').textContent=pending.length+' '+(pending.length===1?'File':'Files');
+  for(const id of ['review-undo','review-keep'])el(id).disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked);
   if(signature!==reviewSignature){reviewSignature=signature;el('review').hidden=!pending.length;el('review-files').replaceChildren();
-    for(const change of pending){const row=make('div','review-row'),file=make('span','review-path',change.relative),counts=make('span','review-counts');file.title=change.relative;
-      const prefix=change.approximate?'~':'';counts.append(make('span','review-added',prefix+'+'+(change.added??0)),make('span','review-removed',prefix+'−'+(change.removed??0)));counts.title=(change.approximate?'估算行数 · ':'')+'新增 / 删除行数';row.append(file,counts);
-      for(const [label,action,title] of [['×','reject','Reject'],['✓','accept','Accept']]){const button=make('button','review-decision review-'+action,label);button.title=title;button.setAttribute('aria-label',title+' '+change.relative);button.disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked);button.onclick=()=>post('reviewDecision',{action,path:change.path,id:s.activeId,checkpointId:s.activeCheckpointId||null,revision:s.revision});row.append(button);}el('review-files').append(row);
+    for(const change of pending){const row=make('div','review-row'),file=make('button','review-path',change.relative),counts=make('span','review-counts'),icon=make('span','review-file-icon','≡');file.title='查看差异 · '+change.relative;file.onclick=()=>post('diff',{path:change.path});icon.setAttribute('aria-hidden','true');
+      const prefix=change.approximate?'~':'';if(change.added)counts.append(make('span','review-added',prefix+'+'+change.added));if(change.removed)counts.append(make('span','review-removed',prefix+'−'+change.removed));counts.title=(change.approximate?'估算行数 · ':'')+'新增 / 删除行数';row.append(icon,file,counts);el('review-files').append(row);
     }
   }
   if (!el('history-panel').hidden) renderHistory();
@@ -390,10 +412,18 @@ el('task-copy').onclick = () => post('copyTasks', { ids: [...taskRows.entries()]
 el('close-history').onclick = closeHistory; el('history-search').oninput = renderHistory;
 for (const id of ['new', 'refresh', 'login', 'folder', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
+el('review-toggle').onclick=()=>{reviewExpanded=!reviewExpanded;el('review-files').hidden=!reviewExpanded;el('review-toggle').setAttribute('aria-expanded',String(reviewExpanded));el('review-arrow').textContent=reviewExpanded?'⌄':'›';};
+for(const action of ['undo','keep'])el('review-'+action).onclick=()=>post('reviewAction',{action,id:state.activeId,checkpointId:state.activeCheckpointId||null,revision:state.revision});
+el('review-open').onclick=()=>post('changes');
+el('model-toggle').onclick=e=>{const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)el('model').focus();};
+el('model-toggle').onkeydown=e=>{if(e.key==='Tab'&&!el('model-panel').hidden){if(!e.shiftKey){e.preventDefault();el('model').focus();}else closeModel();}};
+el('effort-slider').oninput=previewEffort;
+el('effort-slider').onchange=()=>{const option=el('effort').options[Number(el('effort-slider').value)];if(option&&!el('effort-slider').disabled){el('effort').value=option.value;post('effort',{value:option.value});}};
+el('model-panel').addEventListener('keydown',e=>{if(e.key!=='Tab')return;const controls=[el('model'),el('effort-slider')].filter(e=>!e.disabled);if(!controls.length)return;if(e.shiftKey&&document.activeElement===controls[0]){e.preventDefault();controls.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===controls.at(-1)){e.preventDefault();controls[0].focus();}});
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
-document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
-document.addEventListener('click', e => { if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if(!el('model-panel').hidden)closeModel(true);if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
+document.addEventListener('click', e => { if(!el('model-panel').contains(e.target)&&!el('model-toggle').contains(e.target))closeModel();if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
 el('chat-tabs').addEventListener('keydown', e => {
   if (state.operationLocked || state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
   const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;
