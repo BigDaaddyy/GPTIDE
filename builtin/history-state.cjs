@@ -15,6 +15,7 @@ function chats(value) {
     optional(chat, 'branch', value => object(value) && string(value.id) && string(value.name) && Number.isSafeInteger(value.messageIndex) && value.messageIndex >= 0 && value.messageIndex < (chat.messages?.length || 0));
     if (chat.branch && chat.backgroundCount !== chat.branch.messageIndex + 1) invalid('分支背景范围');
     optional(chat, 'queuePaused', value => typeof value === 'boolean');
+    for(const field of ['pinned','archived'])optional(chat,field,value=>typeof value==='boolean');
     optional(chat, 'lastRequest', value => string(value) && value.length <= 100000);
     optional(chat, 'lastOutcome', value => ['preparing', 'running', 'completed', 'failed', 'interrupted', 'unknown'].includes(value));
     optional(chat, 'queue', value => require('./message-queue.cjs').validate(value, chat.id, chat.projectKey));
@@ -27,6 +28,7 @@ function chats(value) {
 function validate(state) {
   if (!object(state)) invalid('根记录'); chats(state.chats);
   optional(state, 'quarantinedChats', chatsValid => { chats(chatsValid); return true; });
+  optional(state,'cursorChatMetadata',value=>object(value)&&Object.keys(value).length<=10000&&Object.values(value).every(meta=>object(meta)&&Object.keys(meta).every(key=>['name','pinned','archived'].includes(key))&&(meta.name===undefined||string(meta.name)&&meta.name.length<=200)&&['pinned','archived'].every(key=>meta[key]===undefined||typeof meta[key]==='boolean')));
   for (const field of ['openChatIds', 'hiddenCursorIds']) optional(state, field, strings);
   for (const field of ['projectKey', 'projectPath', 'activeId', 'model', 'effort', 'mode']) optional(state, field, string);
   return state;

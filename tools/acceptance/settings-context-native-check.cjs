@@ -22,7 +22,7 @@ const { _electron } = require('../acceptance-env.cjs').playwright;
     if (process.argv.includes('--visual')) { await page.screenshot({ path: path.join(require('../acceptance-env.cjs').artifacts, 'settings-context-visual.png') }); return; }
     await app.close(); app = null; fs.writeFileSync(path.join(project, 'src/main.js'), 'const QA = "after";');
     app = await launch(); page = await app.firstWindow(); await page.waitForSelector('.monaco-workbench'); chat = await findFrame(page, '#input'); await chat.waitForFunction(() => !document.querySelector('#input').disabled);
-    assert.ok((await chat.locator('#attachments').innerText()).includes('src/main.js')); assert.ok(!(await chat.locator('#attachments').innerText()).includes('notes.txt'));
+    assert.ok((await chat.locator('#settings').getAttribute('title')).includes('src/main.js'));assert.ok(!(await chat.locator('#settings').getAttribute('title')).includes('notes.txt'));assert.equal(await chat.locator('#attachments .file-chip').count(),0);
     const restored = new (require('../../builtin/project-context.cjs').ProjectContext)(file, project, key).read(); assert.ok(restored.text.includes('after')); assert.ok(!restored.text.includes('excluded QA'));
     await chat.locator('#more').click(); await chat.locator('#settings').click(); settings = await findFrame(page, '#scope'); await settings.locator('#setting-model').waitFor(); assert.equal(await settings.locator('#rules').inputValue(), 'QA project rules\nUse tests');
     console.log('Native configuration tab, project scope persistence, pinned paths/rules, excluded files and fresh reads after restart passed offline; no model request.');

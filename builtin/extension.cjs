@@ -67,7 +67,7 @@ class Chat {
       try {
         const result = storage.read(this.stateFile, state => projectScope.validateState(state, this.projectKey, this.project)), state = result.state || {}, normalize = require('./history-state.cjs').normalize;
         this.quarantinedChats = normalize(state.quarantinedChats || []); this.storageRevision = result.revision; this.chats = normalize(state.chats || []);
-        this.activeId = state.activeId; this.openChatIds = state.openChatIds || []; this.model = state.model || this.model;
+        this.cursorChatMetadata = state.cursorChatMetadata || {}; this.activeId = state.activeId; this.openChatIds = state.openChatIds || []; this.model = state.model || this.model;
         this.effort = state.effort || this.preferences.defaultEffort; this.mode = state.mode || this.preferences.defaultMode; this.hiddenCursorIds = state.hiddenCursorIds || [];
         if (result.recovered) this.historyWarning = '主历史不可用，已恢复上一份本地备份。';
       } catch (e) { this.historyWarning = e.message; this.storageBlocked = true; this.output.appendLine('本地历史读取失败：' + e.message); }
@@ -94,9 +94,9 @@ class Chat {
     for (const chat of this.chats) if (['preparing', 'running'].includes(chat.lastOutcome)) chat.lastOutcome = 'unknown';
     for (const chat of this.chats) if (chat.queue?.length) { chat.queuePaused = true; for (const item of chat.queue) if (item.status === 'starting') { item.status = 'failed'; item.error = '上次发送状态未确认，请检查对话后重试'; } }
     if (this.quarantinedChats.length) this.scopeWarning = `已隐藏 ${this.quarantinedChats.length} 条无法确认当前项目归属的记录。`;
-    if (!this.activeId || !this.chats.some(c => c.id === this.activeId)) this.activeId = this.chats[0]?.id;
+    if (!this.activeId || !this.chats.some(c => c.id === this.activeId)) this.activeId = this.chats.find(c=>!c.archived)?.id;
     this.openChatIds = this.openChatIds.filter(id => this.chats.some(c => c.id === id && c.projectKey === this.projectKey));
-    if (this.activeId) this.select(this.activeId); else this.newChat();
+    if(this.chats.find(c=>c.id===this.activeId)?.archived)this.activeId=this.chats.find(c=>!c.archived)?.id;this.openChatIds=this.openChatIds.filter(id=>!this.chats.find(c=>c.id===id)?.archived);if (this.activeId) this.select(this.activeId); else this.newChat();
     if (this.bridge) this.status = '项目进度已加载'; else if (!this.preferences.autoConnect) this.status = '未连接 · 发送时连接'; this.post();
   }
   async importCursor() {
@@ -105,7 +105,7 @@ class Chat {
       const { stdout } = await exec(path.join(this.root, 'runtime', 'node.exe'), ['--disable-warning=ExperimentalWarning', path.join(this.root, 'tools', 'cursor-import.cjs'), this.project, vscode.workspace.getConfiguration('gptide').get('cursorUserPath') || ''], { windowsHide: true, maxBuffer: 100 * 1024 * 1024, timeout: 60000 });
       const result = JSON.parse(stdout); this.cursorCount = result.chats.length;
       if (this.invalidated) return;
-      const native = this.chats.filter(c => c.source !== 'cursor'); this.chats = [...native, ...result.chats.filter(c => !this.hiddenCursorIds.includes(c.id)).map(c => ({ ...c, projectKey: this.projectKey }))];
+      const native = this.chats.filter(c => c.source !== 'cursor'); this.chats = [...native, ...result.chats.filter(c => !this.hiddenCursorIds.includes(c.id)).map(c => ({ ...c, ...this.cursorChatMetadata?.[c.id], projectKey: this.projectKey }))];
       this.drafts?.apply(this.chats);
       this.importWarning = result.warnings.join('；');
     } catch (e) { this.importWarning = 'Cursor 历史未能读取：' + e.message; }
@@ -148,6 +148,28 @@ class Chat {
     change.status = status;
     const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey), record = chat?.checkpoints?.find(c => c.id === this.activeCheckpointId && c.projectKey === this.projectKey), saved = record?.changes.find(c => c.relative === change.relative);
     if (saved) saved.status = status;
+  }
+  rememberCursorMetadata(chat){
+    if(chat.source==='cursor'){this.cursorChatMetadata||={};Object.defineProperty(this.cursorChatMetadata,chat.id,{value:{name:chat.name,pinned:!!chat.pinned,archived:!!chat.archived},enumerable:true,writable:true,configurable:true});}
+  }
+  setHistoryFlag(id,field,value){
+    if(!['pinned','archived'].includes(field)||typeof value!=='boolean'||this.invalidated||this.storageBlocked||this.actionLocked())return;
+    const chat=this.chats.find(c=>c.id===id&&c.projectKey===this.projectKey);if(!chat)return;
+    const before=chat[field],paused=chat.queuePaused,metadata=this.cursorChatMetadata?.[chat.id];chat[field]=value;
+    if(field==='archived'&&value&&chat.queue?.length)chat.queuePaused=true;this.rememberCursorMetadata(chat);
+    if(!this.save()){chat[field]=before;chat.queuePaused=paused;if(chat.source==='cursor'){if(metadata)this.cursorChatMetadata[chat.id]=metadata;else delete this.cursorChatMetadata[chat.id];}this.post();return;}
+    if(field==='archived'&&value)this.closeTab(chat.id);this.post();
+  }
+  async reviewAction(action,id,checkpointId,revision){
+    const valid=()=>!this.invalidated&&!this.storageBlocked&&!this.actionLocked()&&id===this.activeId&&checkpointId===(this.activeCheckpointId||null)&&revision===this.streamRevision;
+    if(!valid())return;
+    const changes=(this.changes||[]).filter(c=>action==='keep'?c.status==='pending':['pending','accepted'].includes(c.status));
+    if(action==='keep'){
+      for(const change of changes)this.changeStatus(change,'accepted');if(!this.save())for(const change of changes)this.changeStatus(change,'pending');this.post();
+    }else if(action==='undo'&&changes.length){
+      const choice=changes.length===1?{change:changes[0]}:await vscode.window.showQuickPick(changes.map(change=>({label:change.relative,change})),{title:'Undo · 选择要撤销的文件'});
+      if(choice&&valid()&&this.changes.includes(choice.change))await this.revert(choice.change.path);
+    }
   }
   cleanupCheckpoints() {
     if (this.actionLocked() || this.storageBlocked || !this.checkpointStore) return;
@@ -245,7 +267,7 @@ class Chat {
   save() {
     if (this.invalidated || this.loadingScope) return false;
     if (!this.stateFile) return true;
-    const state = { projectKey: this.projectKey, projectPath: this.project, quarantinedChats: this.quarantinedChats, openChatIds: this.openChatIds, activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, chats: this.chats.filter(c => c.source !== 'cursor' && c.projectKey === this.projectKey) };
+    const state = { projectKey: this.projectKey, projectPath: this.project, quarantinedChats: this.quarantinedChats, openChatIds: this.openChatIds, activeId: this.activeId, model: this.model, effort: this.effort, mode: this.mode, hiddenCursorIds: this.hiddenCursorIds, cursorChatMetadata:this.cursorChatMetadata||{}, chats: this.chats.filter(c => c.source !== 'cursor' && c.projectKey === this.projectKey) };
     try {
       const validateOwnership = value => projectScope.validateState(value, this.projectKey, this.project);
       if (this.storageBlocked) { if (this.conflictFile) storage.write(this.conflictFile, state, undefined, validateOwnership); return false; }
@@ -381,10 +403,10 @@ class Chat {
       this.changeStatus(metadata, redo ? 'pending' : 'reverted'); this.save();
     } finally { this.reviewBusy = false; this.post(); }
   }
-  async renameChat() {
-    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || chat.source === 'cursor' || this.actionLocked() || this.storageBlocked || this.invalidated) return;
+  async renameChat(id=this.activeId) {
+    const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;
     const name = await vscode.window.showInputBox({ prompt: '对话名称', value: chat.name, validateInput: s => s.trim() ? null : '名称不能为空' });
-    if (name && !this.actionLocked() && !this.invalidated && this.activeId === chat.id && this.chats.includes(chat)) { chat.name = name.trim().slice(0, 200); this.save(); this.post(); }
+    if (name?.trim() && !this.actionLocked() && !this.invalidated && !this.storageBlocked && this.chats.includes(chat)) {const old=chat.name,metadata=this.cursorChatMetadata?.[chat.id]; chat.name = name.trim().slice(0, 200); this.rememberCursorMetadata(chat);if(!this.save()){chat.name=old;if(chat.source==='cursor'){if(metadata)this.cursorChatMetadata[chat.id]=metadata;else delete this.cursorChatMetadata[chat.id];}} this.post(); }
   }
   async inlineEdit() {
     await this.ready;
@@ -434,13 +456,13 @@ class Chat {
       await vscode.window.showTextDocument(document); vscode.window.showInformationMessage('已应用选区修改。Ctrl+Z 可撤销；保存文件由你决定。');
     } finally { if (this.inlineCancellation === cancellation) this.inlineCancellation = null; cancellation.dispose(); this.inlineBusy = false; this.post(); if (!this.invalidated) this.scheduleQueue(this.activeId); }
   }
-  async deleteChat() {
-    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;
+  async deleteChat(id=this.activeId) {
+    const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;
     const answer = await vscode.window.showWarningMessage(chat.source === 'cursor' ? '从 GptIDE 隐藏此对话？Cursor 原记录会保留。' : '删除本地对话记录？', { modal: true }, '确认');
-    if (answer !== '确认' || this.actionLocked() || this.invalidated || this.activeId !== chat.id || !this.chats.includes(chat)) return;
+    if (answer !== '确认' || this.actionLocked() || this.storageBlocked || this.invalidated || !this.chats.includes(chat)) return;
     if (chat.source === 'cursor') this.hiddenCursorIds.push(chat.id);
     this.chats = this.chats.filter(c => c.id !== chat.id); this.openChatIds = this.openChatIds.filter(id => id !== chat.id);
-    const next = this.openChatIds[0] || this.chats[0]?.id; if (next) this.select(next); else this.newChat(); this.save();
+    this.chatAttachments?.delete(chat.id);if(this.cursorChatMetadata)delete this.cursorChatMetadata[chat.id];if(this.activeId===chat.id){const next=this.openChatIds[0]||this.chats.find(c=>!c.archived)?.id;if(next)this.select(next);else this.newChat();}this.save();this.post();
   }
   async connect() {
     if (this.invalidated) throw new Error('项目已切换');
@@ -737,8 +759,10 @@ class Chat {
         if (msg.type === 'attachGitDiff') await this.attachContext('git');
         if (msg.type === 'attachFolder') await this.attachContext('folder');
         if (msg.type === 'removeAttachment') { this.attachments = this.attachments.filter(a => a.id !== msg.id); this.post(); }
-        if (msg.type === 'rename') await this.renameChat();
-        if (msg.type === 'delete') await this.deleteChat();
+        if (msg.type === 'rename') await this.renameChat(msg.id);
+        if(msg.type==='pinChat'||msg.type==='archiveChat')this.setHistoryFlag(msg.id,msg.type==='pinChat'?'pinned':'archived',msg.value);
+        if(msg.type==='reviewAction')await this.reviewAction(msg.action,msg.id,msg.checkpointId,msg.revision);
+        if (msg.type === 'delete') await this.deleteChat(msg.id);
         if (msg.type === 'diff') await this.showDiff(msg.path);
         if (msg.type === 'diffCurrent') await this.showCurrentDiff(msg.path);
         if (msg.type === 'checkpoint') this.selectCheckpoint(msg.id);

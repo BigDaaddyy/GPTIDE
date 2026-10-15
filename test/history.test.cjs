@@ -12,3 +12,9 @@ test('history excludes empty tabs and groups identical conversations without del
   assert.equal(entries([a, { ...b, tasks: [{ kind: 'command', output: 'different result' }] }]).length, 2);
   assert.equal(entries([{ ...a, branch: { id: 'origin' } }, { ...b, branch: { id: 'origin' } }]).length, 2);
 });
+
+test('managed histories preserve identity, pinned order and archived metadata',()=>{
+ const base={name:'same',messages:[{text:'same'}]},rows=entries([{...base,id:'recent',updatedAt:20},{...base,id:'pin',pinned:true,updatedAt:1},{...base,id:'archive',archived:true,updatedAt:10}]);assert.equal(rows.length,3);assert.equal(rows[0].id,'pin');assert.equal(rows.find(c=>c.id==='archive').archived,true);
+ assert.equal(entries([{id:'empty',name:'Pinned empty',messages:[],pinned:true}]).length,1);assert.equal(entries([{id:'draft',name:'Renamed draft',draft:'other text'}])[0].name,'Renamed draft');
+ const validate=require('../builtin/history-state.cjs').validate;assert.throws(()=>validate({chats:[{id:'x',archived:'true'}]}),/archived/);assert.throws(()=>validate({chats:[],cursorChatMetadata:{x:{pinned:'bad'}}}),/cursorChatMetadata/);assert.doesNotThrow(()=>validate({chats:[],cursorChatMetadata:{x:{name:'Local alias',pinned:true,archived:false}}}));
+});

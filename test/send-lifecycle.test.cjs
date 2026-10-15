@@ -439,3 +439,17 @@ test('stream patches exclude old history and fall back to full state after a con
   assert.equal(snapshots[1].type, 'stream'); assert.equal(snapshots[1].revision, revision); assert.equal(snapshots[1].messages.length, 1); assert.equal(snapshots[1].messageCount, 2001); assert.equal(snapshots[1].messages[0].index, 2000); assert.ok(JSON.stringify(snapshots[1]).length < 400);
   chat.activeId = 'changed'; chat.postStream(); assert.equal(snapshots[2].type, 'state'); assert.ok(snapshots[2].revision > revision);
 });
+
+test('history flags are project scoped, persisted for imported chats and rollback on save failure',()=>{
+ const chat=fixture(),own=chat.chats[0];chat.closeTab=id=>{chat.closed=id;};chat.setHistoryFlag('foreign','pinned',true);assert.equal(own.pinned,undefined);chat.setHistoryFlag('one','pinned',true);assert.equal(own.pinned,true);
+ own.source='cursor';own.queue=[{text:'pending'}];chat.setHistoryFlag('one','archived',true);assert.equal(chat.closed,'one');assert.equal(own.queuePaused,true);assert.equal(chat.cursorChatMetadata.one.archived,true);chat.setHistoryFlag('one','archived',false);assert.equal(chat.cursorChatMetadata.one.archived,false);assert.equal(own.queuePaused,true);
+ chat.save=()=>false;chat.setHistoryFlag('one','pinned',false);assert.equal(own.pinned,true);assert.equal(chat.cursorChatMetadata.one.pinned,true);chat.busy=true;chat.setHistoryFlag('one','pinned',false);assert.equal(own.pinned,true);
+});
+test('rename and delete target chosen history without switching current chat',async()=>{
+ const chat=fixture(),other={id:'two',projectKey:'project',name:'old',source:'cursor',messages:[]};chat.chats.push(other);chat.hiddenCursorIds=[];const saved={input:vscode.window.showInputBox,warning:vscode.window.showWarningMessage};
+ try{vscode.window.showInputBox=async()=> 'Renamed';await chat.renameChat('two');assert.equal(other.name,'Renamed');assert.equal(chat.cursorChatMetadata.two.name,'Renamed');assert.equal(chat.activeId,'one');vscode.window.showWarningMessage=async()=> '确认';await chat.deleteChat('two');assert.equal(chat.activeId,'one');assert.equal(chat.chats.length,1);assert.deepEqual(chat.hiddenCursorIds,['two']);assert.equal(chat.cursorChatMetadata.two,undefined);}finally{vscode.window.showInputBox=saved.input;vscode.window.showWarningMessage=saved.warning;}
+});
+test('code review Keep persists and Undo chooses a file without bulk overwriting changes',async()=>{
+ const chat=fixture();chat.streamRevision=3;chat.activeCheckpointId='cp';chat.changes=[{path:'first',relative:'first',status:'pending'},{path:'second',relative:'second',status:'pending'}];await chat.reviewAction('keep','one','cp',2);assert.equal(chat.changes[0].status,'pending');await chat.reviewAction('keep','one','cp',3);assert.ok(chat.changes.every(c=>c.status==='accepted'));
+ const prior=vscode.window.showQuickPick;let undone;chat.revert=async file=>{undone=file;};try{vscode.window.showQuickPick=async items=>items[1];await chat.reviewAction('undo','one','cp',3);assert.equal(undone,'second');vscode.window.showQuickPick=async items=>{chat.activeId='different';return items[0];};undone=undefined;await chat.reviewAction('undo','one','cp',3);assert.equal(undone,undefined);}finally{vscode.window.showQuickPick=prior;}
+});

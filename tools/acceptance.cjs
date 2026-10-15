@@ -10,6 +10,7 @@ const scenarios = [
   ['keyboard','keyboard-native-check.cjs'],
   ['code','code-native-check.cjs'],
   ['chrome-scm','chrome-scm-native-check.cjs'],
+  ['history-review','history-review-native-check.cjs'],
   ['queue', 'queue-native-check.cjs'], ['inline', 'inline-widget-native-check.cjs'], ['recovery', 'recovery-native-check.cjs'],
   ['checkpoints', 'checkpoint-ui-check.cjs'], ['menus-light', 'menu-audit.cjs', ['--after']], ['menus-dark', 'menu-audit.cjs', ['--after', '--dark']]
 ];
