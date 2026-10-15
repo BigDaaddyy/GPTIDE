@@ -63,6 +63,7 @@
 .monaco-workbench .watermark-container:has(.gptide-home) > .letterpress { display: none; }
 .monaco-workbench .watermark-container:has(.gptide-home) { gap: 0 !important; }
 .monaco-workbench .editor-group-container.empty .shortcuts:has(.gptide-home) { display: block !important; }
+.editor-group-watermark-wrapper.gptide-project-open { display: none !important; }
 .gptide-home { width: 100%; padding: 28px 0; box-sizing: border-box; color: var(--vscode-foreground); }
 .gptide-home button { font: inherit; color: inherit; cursor: pointer; }
 .gptide-home button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #5e6ad2); outline-offset: 2px; }

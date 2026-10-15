@@ -1,8 +1,12 @@
 function render() {
-  this.enabled = true;
   this.shortcuts.replaceChildren();
   this.transientDisposables.clear();
   const generation = this.homeGeneration = (this.homeGeneration || 0) + 1;
+  const workspace = this.contextService.getWorkspace();
+  const hasProject = workspace.folders.length > 0 || !!workspace.configuration;
+  this.shortcuts.closest('.editor-group-watermark-wrapper')?.classList.toggle('gptide-project-open', hasProject);
+  this.enabled = !hasProject;
+  if (hasProject) return;
   const commands = this.instantiationService.invokeFunction(accessor => accessor.get(Ie));
   const home = document.createElement('section'); home.className = 'gptide-home'; home.setAttribute('aria-label', 'GptIDE 项目首页');
   const make = (tag, className, text, parent) => { const node = document.createElement(tag); node.className = className; if (text) node.textContent = text; parent.append(node); return node; };

@@ -33,6 +33,8 @@
 
 ## 发布复核
 
+- 1.5.1：158 项源码回归、语法/构建/运行包校验通过。原生 home 全流程通过于 `downloads/acceptance/1792063963333-35116/report.json`：从空窗口实际点击最近项目后首页消失，关闭全部编辑器仍不显示，File 菜单关闭项目后首页恢复且无聊天输入框。截图 `home-preview.png` / `home-project-open.png`。测试使用独立临时项目，不操作用户项目或真实模型。
+
 - 1.5.0：156 项源码回归、语法及运行包验证通过。网页三项和原生审批菜单持久化/文件操作通过于 `downloads/acceptance/1792062418598-26788/`；最终七个差异顶栏按钮通过于 `downloads/acceptance/1792062544659-37028/`，清单与结果为 `diff-toolbar-buttons.json` / `diff-toolbar-audit.json`。导航实际80→150→80、配置开关/菜单/分组/打开文件均核对；审批模式原生保存并重启恢复。自动审核仅验证协议参数，不宣称真实账号自动审批端到端验证。
 
 - 1.4.0：155项源码测试、语法/构建/运行包一致性通过。最终离线验收5/5，报告 `downloads/acceptance/1792061332921-22552/report.json`，包含网页3项、原生 Git 顶栏按钮与文件审核2项。`model-fast-compact.png` 证明216px浮层及 Fast 状态，`git-diff-openNew.png` / `git-diff-openTracked.png` 证明真实按钮打开新文件和已有文件的差异，核对内容及无暂存修改。Fast 以模拟目录和请求参数测试、本机CLI协议离线导出核对为证据，不宣称实际账号加速性能验证；官方说明为 https://learn.chatgpt.com/docs/agent-configuration/speed 。
