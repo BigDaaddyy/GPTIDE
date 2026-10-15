@@ -2,12 +2,14 @@
   "name": "gptide-chat",
   "displayName": "GptIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "engines": {
     "vscode": "^1.100.0"
   },
   "main": "./extension.cjs",
-  "enabledApiProposals": ["contribSourceControlInputBoxMenu"],
+  "enabledApiProposals": [
+    "contribSourceControlInputBoxMenu"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true
@@ -109,6 +111,11 @@
         "command": "gptide.cleanupCheckpoints",
         "title": "GptIDE: 清理未引用的检查点缓存",
         "enablement": "workspaceFolderCount == 1"
+      },
+      {
+        "command": "gptide.openChanges",
+        "title": "打开更改",
+        "icon": "$(compare-changes)"
       }
     ],
     "keybindings": [

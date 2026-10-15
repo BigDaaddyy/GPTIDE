@@ -9,7 +9,7 @@ const draftTimes = previous.draftTimes || {}; let draftTimer, draftSequence = 0,
 let pendingTabChange = false, pendingSend = false, pendingQueue = false;
 let handledFocusId;
 let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', reviewSignature = '';
-let reviewScope,reviewExpanded=false;
+let reviewScope,reviewExpanded=false,modelOptionsSignature;
 const effortNames={minimal:'最轻',low:'低',medium:'中',high:'高',xhigh:'更高',max:'Max',ultra:'Ultra'};
 function renderEffort(){
   const choices=Array.from(el('effort').options),index=Math.max(0,choices.findIndex(e=>e.value===el('effort').value));
@@ -265,21 +265,27 @@ function render(s) {
   el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
   el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
   renderQueue(s);
-  const options = JSON.stringify([s.models, s.model, s.effort, s.preferences?.autoConnect]);
+  const selectionModels=s.modelChoices||s.models;
+  const options = JSON.stringify([selectionModels, s.model, s.effort, s.preferences?.autoConnect]);
   if (options !== optionsSignature) {
-    optionsSignature = options; el('model').replaceChildren(); if (!s.models.length) el('model').add(new Option(s.model ? '默认 ' + s.model.replace(/^gpt-/i, '').replaceAll('-', ' ') : '发送时加载模型', s.model || ''));
-    for (const m of s.models) el('model').add(new Option(m.displayName || m.model, m.model)); el('model').value = s.model;
+    optionsSignature = options; el('model').replaceChildren(); if (!selectionModels.length) el('model').add(new Option(s.model ? '默认 ' + s.model.replace(/^gpt-/i, '').replaceAll('-', ' ') : '发送时加载模型', s.model || ''));
+    for (const m of selectionModels) el('model').add(new Option(m.displayName || m.model, m.model)); el('model').value = s.model;
     el('effort').replaceChildren(); const model = s.models.find(m => m.model === s.model), names = { minimal: '最轻', low: '轻量', medium: '均衡', high: '深入', xhigh: '更深入', max: 'Max', ultra: 'Ultra' };
     for (const e of model?.supportedReasoningEfforts || []) el('effort').add(new Option(names[e.reasoningEffort] || e.reasoningEffort, e.reasoningEffort)); el('effort').value = s.effort;
     if (!el('effort').options.length) { el('effort').add(new Option(names[s.effort] || '默认', s.effort || '')); el('effort').value = s.effort || ''; }
   }
-  el('model').disabled ||= !s.models.length; el('model').title = s.models.length ? '选择模型' : '默认模型；连接后确认可用性';
-  el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
-  el('model-label').textContent=s.models.find(m=>m.model===s.model)?.displayName||s.model||'选择模型';
+  el('model').disabled ||= !selectionModels.length||!!s.storageBlocked; el('model').title = s.models.length ? '选择模型' : '默认模型；连接后确认可用性';
+  el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !!s.storageBlocked || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
+  el('model-label').textContent=selectionModels.find(m=>m.model===s.model)?.displayName||s.model||'选择模型';
   el('model-toggle').disabled=!!s.loadingScope;renderEffort();
   el('model-choice').textContent=el('model-label').textContent;el('model-choice').disabled=el('model').disabled;
   if(el('model-choice').disabled)closeModelOptions();
-  el('model-options').replaceChildren(...s.models.map(model=>{const button=make('button','model-option',model.displayName||model.model);button.setAttribute('role','option');button.setAttribute('aria-selected',String(model.model===s.model));button.onclick=()=>{el('model').value=model.model;el('model').onchange();closeModelOptions();el('model-choice').focus();};return button;}));
+  const modelList=JSON.stringify([selectionModels,s.model]);if(modelOptionsSignature!==modelList){modelOptionsSignature=modelList;
+    el('model-options').replaceChildren(...selectionModels.map(model=>{const name=model.displayName||model.model,button=make('button','model-option');button.append(make('span','model-option-name',name));if(model.recommended)button.append(make('span','model-tag',model.unverified?'待验证':'推荐'));button.setAttribute('role','option');button.setAttribute('aria-label',name);button.setAttribute('aria-selected',String(model.model===s.model));button.onclick=()=>{el('model').value=model.model;el('model').onchange();closeModelOptions();el('model-choice').focus();};return button;}));
+  }
+  const fastTier=s.models.find(m=>m.model===s.model)?.serviceTiers?.find(t=>['fast','priority'].includes(t.id)),fastOn=!!fastTier&&s.serviceTier===fastTier.id;
+  el('model-fast').disabled=!fastTier||!!(s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked);el('model-fast').setAttribute('aria-pressed',String(fastOn));el('model-fast').dataset.tier=fastTier?.id||'';
+  el('model-fast').title=fastTier?(fastOn?'关闭':'开启')+' Fast'+(/^gpt-5\.6/.test(s.model)?' · 约 1.5× 速度':'')+' · 会员额度按标准的 2.5× 消耗':'当前模型未提供 Fast 档位';
   el('model-note').hidden=!!s.models.length&&!el('model').disabled;
   el('model-note').textContent=s.models.length?'当前操作完成后可切换模型':s.status&&s.status!=='加载中'?s.status:'尚未加载可用模型';
   el('model-load').hidden=!!s.models.length;el('model-load').disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.loadingScope);
@@ -422,11 +428,12 @@ el('model').onchange = () => post('model', { value: el('model').value }); el('ef
 el('review-toggle').onclick=()=>{reviewExpanded=!reviewExpanded;el('review-files').hidden=!reviewExpanded;el('review-toggle').setAttribute('aria-expanded',String(reviewExpanded));el('review-arrow').textContent=reviewExpanded?'⌄':'›';};
 for(const action of ['undo','keep'])el('review-'+action).onclick=()=>post('reviewAction',{action,id:state.activeId,checkpointId:state.activeCheckpointId||null,revision:state.revision});
 el('review-open').onclick=()=>post('changes');
-const modelControls=()=>[el('model-choice'),...(!el('model-options').hidden?Array.from(el('model-options').children):[]),el('effort-slider'),el('model-load')].filter(e=>!e.disabled&&!e.hidden);
+const modelControls=()=>[el('model-fast'),el('model-choice'),...(!el('model-options').hidden?Array.from(el('model-options').children):[]),el('effort-slider'),el('model-load')].filter(e=>!e.disabled&&!e.hidden);
 el('model-toggle').onclick=e=>{const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)modelControls()[0]?.focus();};
 el('model-toggle').onkeydown=e=>{if(e.key==='Tab'&&!el('model-panel').hidden){if(!e.shiftKey&&modelControls().length){e.preventDefault();modelControls()[0].focus();}else closeModel();}};
 el('model-load').onclick=()=>{el('model-load').disabled=true;el('model-note').textContent='正在加载可用模型…';post('reconnect');};
-el('model-heading').onclick=()=>{if(el('model-choice').disabled)return;const open=el('model-options').hidden;el('model-options').hidden=!open;el('model-choice').setAttribute('aria-expanded',String(open));if(open)(el('model-options').querySelector('[aria-selected=true]')||el('model-options').firstElementChild)?.focus();};
+el('model-fast').onclick=e=>{e.stopPropagation();post('serviceTier',{value:el('model-fast').getAttribute('aria-pressed')==='true'?'default':el('model-fast').dataset.tier});};
+el('model-heading').onclick=e=>{if(e.target.closest('#model-fast'))return;if(el('model-choice').disabled)return;const open=el('model-options').hidden;el('model-options').hidden=!open;el('model-choice').setAttribute('aria-expanded',String(open));if(open)(el('model-options').querySelector('[aria-selected=true]')||el('model-options').firstElementChild)?.focus();};
 el('model-options').onkeydown=e=>{const choices=Array.from(el('model-options').children),index=choices.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();choices[e.key==='Home'?0:e.key==='End'?choices.length-1:(index+(e.key==='ArrowDown'?1:-1)+choices.length)%choices.length]?.focus();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModelOptions();el('model-choice').focus();}};
 el('effort-slider').oninput=previewEffort;
 el('effort-slider').onchange=()=>{const option=el('effort').options[Number(el('effort-slider').value)];if(option&&!el('effort-slider').disabled){el('effort').value=option.value;post('effort',{value:option.value});}};

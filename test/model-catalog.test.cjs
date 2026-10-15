@@ -17,3 +17,11 @@ test('effort selection only uses a requested, default or first advertised value'
   const model={defaultReasoningEffort:'not-listed',supportedReasoningEfforts:[{reasoningEffort:'high'},{reasoningEffort:'future-value'}]};
   assert.equal(catalog.effort(model,'future-value'),'future-value');assert.equal(catalog.effort(model,'medium'),'high');assert.equal(catalog.effort({supportedReasoningEfforts:[]},'medium'),undefined);
 });
+
+test('recommended presets remain unverified offline and never add unavailable models to a live catalog',()=>{
+ const offline=catalog.choices([]);assert.deepEqual(offline.map(m=>m.model),['gpt-6.1-sol','gpt-6-astra','gpt-6-sol','gpt-6-luna']);assert.ok(offline.every(m=>m.unverified&&!m.serviceTiers));
+ const live=catalog.choices([{model:'other'},{model:'gpt-6-luna'},{model:'gpt-6.1-sol'}]);assert.deepEqual(live.map(m=>m.model),['gpt-6.1-sol','gpt-6-luna','other']);assert.equal(live[0].recommended,true);assert.equal(live[2].recommended,false);
+});
+test('Fast mode only accepts service tiers explicitly advertised for the selected model',()=>{
+ const model=catalog.normalize({model:'fixture',serviceTiers:[{id:'fast',name:'Fast'},{id:'fast',name:'Fast'},{id:'ultrafast'},{id:'injected'},null]});assert.deepEqual(model.serviceTiers,[{id:'fast',name:'Fast'}]);assert.equal(catalog.tier(model,'fast'),'fast');assert.equal(catalog.tier(model,'priority'),'default');assert.equal(catalog.tier(undefined,'fast'),'default');assert.equal(catalog.tier(model,'default'),'default');
+});

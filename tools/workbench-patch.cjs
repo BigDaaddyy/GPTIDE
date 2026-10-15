@@ -48,4 +48,14 @@ function compactChatChrome(source){
   const original=source.slice(start,end),patched=original.replace('let n;if(this.options.hasTitle)',marker+condition+'let n;if(this.options.hasTitle&&!gptideCompact)').replace('if(this.headerVisible)','if(this.headerVisible&&!gptideCompact)').replace('if(this.footerVisible)','if(this.footerVisible&&!gptideCompact)');
   return source.slice(0,start)+patched+source.slice(end);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome };
+function gitOpenChange(source){
+  const marker='/* GPTIDE: Git change fallback */';
+  const anchor='if(r)for(let n of r)await n.openChange()}async compareWithWorkspace(e)';
+  const old='if(r)for(let n of r)await n.openChange();else '+marker+'await d.commands.executeCommand("gptide.openChanges",e instanceof d.Uri?e:void 0)}async compareWithWorkspace(e)';
+  const patched=marker+'if(r){for(let n of r){if([w.UNTRACKED,w.INDEX_ADDED,w.INTENT_TO_ADD].includes(n.type))await d.commands.executeCommand("gptide.openChanges",n.resourceUri);else await n.openChange()}}else await d.commands.executeCommand("gptide.openChanges",e instanceof d.Uri?e:void 0)}async compareWithWorkspace(e)';
+  if(source.includes(patched))return source;
+  const target=source.includes(old)?old:anchor;
+  if(source.split(target).length!==2)throw new Error('原生 Git 打开更改结构已变化，请更新补丁');
+  return source.replace(target,patched);
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome, gitOpenChange };

@@ -31,7 +31,7 @@ class Bridge extends EventEmitter {
     const env = { ...process.env };
     delete env.OPENAI_API_KEY; delete env.OPENAI_BASE_URL;
     delete env.AZURE_OPENAI_API_KEY;
-    this.child = spawn(this.executable, ['-c', 'model_provider="openai"', '-c', 'forced_login_method="chatgpt"', 'app-server'], {
+    this.child = spawn(this.executable, ['-c', 'model_provider="openai"', '-c', 'forced_login_method="chatgpt"', '-c', 'features.fast_mode=true', 'app-server'], {
       cwd: this.cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']
     });
     this.child.on('error', e => this.fail(e));

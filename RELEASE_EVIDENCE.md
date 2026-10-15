@@ -33,6 +33,8 @@
 
 ## 发布复核
 
+- 1.4.0：155项源码测试、语法/构建/运行包一致性通过。最终离线验收5/5，报告 `downloads/acceptance/1792061332921-22552/report.json`，包含网页3项、原生 Git 顶栏按钮与文件审核2项。`model-fast-compact.png` 证明216px浮层及 Fast 状态，`git-diff-openNew.png` / `git-diff-openTracked.png` 证明真实按钮打开新文件和已有文件的差异，核对内容及无暂存修改。Fast 以模拟目录和请求参数测试、本机CLI协议离线导出核对为证据，不宣称实际账号加速性能验证；官方说明为 https://learn.chatgpt.com/docs/agent-configuration/speed 。
+
 - 1.3.3：模型入口空目录和任务中均有反馈；网页核对实际选择消息及显式加载，原生窗口验证真实点击。网页3项及原生1项合计4/4通过，报告 `downloads/acceptance/1792059929203-23924/report.json`，截图 `model-picker-native.png`。模拟目录的可选模型不代表真实账号权限；未连接模型。语法、构建及运行包校验通过。
 
 - 1.3.2：147 项源码回归、语法/构建/运行包验证通过。最终离线验收网页3项、原生历史与文件操作2项，合计5/5通过，报告 `downloads/acceptance/1792059271098-33028/report.json`。截图 `model-picker-260.png` / `model-picker-300.png` / `model-picker-390.png`、`compact-chat-300.png`、`review-expanded-300.png`；覆盖实际目录档位、方向键/Tab/Esc、运行锁、默认折叠、展开差异、批量预检及实际 Undo/Keep 和历史持久化。不连接真实模型。

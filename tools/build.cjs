@@ -10,6 +10,8 @@ const originalCss = fs.readFileSync(workbenchCss, 'utf8').replace(/\n?\/\* GPTID
 fs.writeFileSync(workbenchCss, originalCss + '\n' + styleStart + '\n' + fs.readFileSync(path.join(__dirname, 'workbench.css'), 'utf8') + '\n' + styleEnd);
 const workbenchJs = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.js');
 const nativePatch = require('./workbench-patch.cjs');
+const gitMain=path.join(app,'resources/app/extensions/git/dist/main.js');
+fs.writeFileSync(gitMain,nativePatch.gitOpenChange(fs.readFileSync(gitMain,'utf8')));
 fs.writeFileSync(workbenchJs, nativePatch.homePage(nativePatch.gptAccountMenu(nativePatch.hideTunnelMenu(fs.readFileSync(workbenchJs, 'utf8'))), fs.readFileSync(path.join(__dirname, 'home-render.js'), 'utf8')));
 fs.writeFileSync(workbenchJs, nativePatch.inlineInput(fs.readFileSync(workbenchJs, 'utf8'), fs.readFileSync(path.join(__dirname, 'inline-widget.js'), 'utf8')));
 fs.writeFileSync(workbenchJs,nativePatch.compactChatChrome(fs.readFileSync(workbenchJs,'utf8')));

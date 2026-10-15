@@ -31,6 +31,7 @@ function validate(state) {
   optional(state,'cursorChatMetadata',value=>object(value)&&Object.keys(value).length<=10000&&Object.values(value).every(meta=>object(meta)&&Object.keys(meta).every(key=>['name','pinned','archived'].includes(key))&&(meta.name===undefined||string(meta.name)&&meta.name.length<=200)&&['pinned','archived'].every(key=>meta[key]===undefined||typeof meta[key]==='boolean')));
   for (const field of ['openChatIds', 'hiddenCursorIds']) optional(state, field, strings);
   for (const field of ['projectKey', 'projectPath', 'activeId', 'model', 'effort', 'mode']) optional(state, field, string);
+  optional(state,'serviceTier',value=>['default','fast','priority'].includes(value));
   return state;
 }
 function normalize(records) { return records.map(chat => ({ ...chat, messages: (chat.messages || []).map(message => ({ ...message, text: message.text ?? '' })), tasks: chat.tasks || [], changes: chat.changes || [], checkpoints: chat.checkpoints || [] })); }

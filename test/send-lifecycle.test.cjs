@@ -470,3 +470,15 @@ test('simple file decisions reject stale scope and preserve pending state after 
  const chat=fixture();chat.streamRevision=1;chat.activeCheckpointId='cp';chat.changes=[{path:'file',relative:'file',status:'pending'}];const msg={id:'one',checkpointId:'cp',revision:1,path:'file',action:'accept'};
  await chat.reviewDecision({...msg,id:'foreign'});await chat.reviewDecision({...msg,revision:0});assert.equal(chat.changes[0].status,'pending');chat.save=()=>false;await chat.reviewDecision(msg);assert.equal(chat.changes[0].status,'pending');chat.save=()=>true;await chat.reviewDecision(msg);assert.equal(chat.changes[0].status,'accepted');let rejected=0;chat.revert=async()=>rejected++;await chat.reviewDecision({...msg,action:'reject'});assert.equal(rejected,0);chat.changes[0].status='pending';await chat.reviewDecision({...msg,action:'reject'});assert.equal(rejected,1);
 });
+
+test('offline presets save safely and Fast selection requires catalog support with rollback and locks',()=>{
+ const chat=fixture();chat.chooseModel('arbitrary');assert.equal(chat.model,'fixture');chat.chooseModel('gpt-6.1-sol');assert.equal(chat.model,'gpt-6.1-sol');assert.equal(chat.serviceTier,'default');chat.chooseServiceTier('fast');assert.equal(chat.serviceTier,'default');
+ chat.models=[{model:'gpt-6.1-sol',serviceTiers:[{id:'fast'}]},{model:'other',serviceTiers:[]}];chat.chooseServiceTier('fast');assert.equal(chat.serviceTier,'fast');chat.busy=true;chat.chooseServiceTier('default');assert.equal(chat.serviceTier,'fast');chat.busy=false;chat.save=()=>false;chat.chooseServiceTier('default');assert.equal(chat.serviceTier,'fast');chat.chooseModel('other');assert.equal(chat.model,'gpt-6.1-sol');assert.equal(chat.serviceTier,'fast');chat.save=()=>true;chat.chooseModel('other');assert.equal(chat.serviceTier,'default');chat.chooseModel('gpt-6-luna');assert.equal(chat.model,'other');
+});
+test('thread and turn requests carry explicit standard or supported Fast tier',async()=>{
+ for(const [requested,supported,expected] of [['fast',true,'fast'],['default',true,'default'],['fast',false,'default']]){
+  const chat=fixture(),calls=[];chat.threadId=null;chat.resumed=false;chat.serviceTier=requested;chat.models=[{model:'fixture',serviceTiers:supported?[{id:'fast'}]:[]}];
+  chat.connect=async()=>({call:async(method,params)=>{calls.push({method,params});return method==='thread/start'?{thread:{id:'tier-fixture'}}:{turn:{id:'tier-turn'}};}});
+  await chat.send('offline tier fixture','ask',false);assert.deepEqual(calls.map(c=>c.method),['thread/start','turn/start']);assert.ok(calls.every(c=>c.params.serviceTier===expected));
+ }
+});
