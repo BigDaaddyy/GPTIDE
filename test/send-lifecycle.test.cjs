@@ -477,8 +477,10 @@ test('offline presets save safely and Fast selection requires catalog support wi
 });
 test('thread and turn requests carry explicit standard or supported Fast tier',async()=>{
  for(const [requested,supported,expected] of [['fast',true,'fast'],['default',true,'default'],['fast',false,'default']]){
-  const chat=fixture(),calls=[];chat.threadId=null;chat.resumed=false;chat.serviceTier=requested;chat.models=[{model:'fixture',serviceTiers:supported?[{id:'fast'}]:[]}];
+  const chat=fixture(),calls=[];chat.threadId=null;chat.resumed=false;chat.serviceTier=requested;chat.approvalMode=supported?'auto_review':'user';chat.models=[{model:'fixture',serviceTiers:supported?[{id:'fast'}]:[]}];
   chat.connect=async()=>({call:async(method,params)=>{calls.push({method,params});return method==='thread/start'?{thread:{id:'tier-fixture'}}:{turn:{id:'tier-turn'}};}});
-  await chat.send('offline tier fixture','ask',false);assert.deepEqual(calls.map(c=>c.method),['thread/start','turn/start']);assert.ok(calls.every(c=>c.params.serviceTier===expected));
+  await chat.send('offline tier fixture','ask',false);assert.deepEqual(calls.map(c=>c.method),['thread/start','turn/start']);assert.ok(calls.every(c=>c.params.serviceTier===expected));assert.ok(calls.every(c=>c.params.approvalPolicy==='on-request'&&c.params.approvalsReviewer===(supported?'auto_review':'user')));
  }
 });
+
+test('approval picker uses interactive policy and actual reviewer, validates choices and rolls back failed saves',()=>{const chat=fixture();chat.chooseApprovalMode('never');assert.equal(chat.approvalMode,undefined);chat.chooseApprovalMode('auto_review');assert.deepEqual(chat.approvalSettings(),{approvalPolicy:'on-request',approvalsReviewer:'auto_review'});chat.busy=true;chat.chooseApprovalMode('user');assert.equal(chat.approvalMode,'auto_review');chat.busy=false;chat.save=()=>false;chat.chooseApprovalMode('user');assert.equal(chat.approvalMode,'auto_review');chat.save=()=>true;chat.chooseApprovalMode('user');assert.deepEqual(chat.approvalSettings(),{approvalPolicy:'on-request',approvalsReviewer:'user'});});

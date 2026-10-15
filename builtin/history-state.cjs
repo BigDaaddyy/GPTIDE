@@ -32,6 +32,7 @@ function validate(state) {
   for (const field of ['openChatIds', 'hiddenCursorIds']) optional(state, field, strings);
   for (const field of ['projectKey', 'projectPath', 'activeId', 'model', 'effort', 'mode']) optional(state, field, string);
   optional(state,'serviceTier',value=>['default','fast','priority'].includes(value));
+  optional(state,'approvalMode',value=>['user','auto_review'].includes(value));
   return state;
 }
 function normalize(records) { return records.map(chat => ({ ...chat, messages: (chat.messages || []).map(message => ({ ...message, text: message.text ?? '' })), tasks: chat.tasks || [], changes: chat.changes || [], checkpoints: chat.checkpoints || [] })); }

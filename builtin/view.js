@@ -25,6 +25,7 @@ function previewEffort(){
   el('effort-slider').style.setProperty('--effort-fill',(Number(el('effort-slider').max)?100*Number(el('effort-slider').value)/Number(el('effort-slider').max):0)+'%');
 }
 function closeModelOptions(){el('model-options').hidden=true;el('model-choice').setAttribute('aria-expanded','false');}
+function closeApproval(focus=false){el("approval-panel").hidden=true;el("approval-toggle").setAttribute("aria-expanded","false");if(focus)el("approval-toggle").focus();}
 function closeModel(focus=false){closeModelOptions();el('model-panel').hidden=true;el('model-toggle').setAttribute('aria-expanded','false');if(focus)el('model-toggle').focus();}
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
@@ -278,6 +279,9 @@ function render(s) {
   el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !!s.storageBlocked || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
   el('model-label').textContent=selectionModels.find(m=>m.model===s.model)?.displayName||s.model||'选择模型';
   el('model-toggle').disabled=!!s.loadingScope;renderEffort();
+  const approval=s.approvalsReviewer||'user',noApproval=(s.approvalPolicy||s.preferences?.approvalPolicy)==='never';el('approval-label').textContent=noApproval?'不请求批准':approval==='auto_review'?'帮我批准':'请求批准';
+  for(const [id,value] of [['approval-user','user'],['approval-auto','auto_review']]){el(id).setAttribute('aria-checked',String(!noApproval&&approval===value));el(id).disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked||s.loadingScope);}
+  el('approval-toggle').disabled=!!s.loadingScope;
   el('model-choice').textContent=el('model-label').textContent;el('model-choice').disabled=el('model').disabled;
   if(el('model-choice').disabled)closeModelOptions();
   const modelList=JSON.stringify([selectionModels,s.model]);if(modelOptionsSignature!==modelList){modelOptionsSignature=modelList;
@@ -429,7 +433,11 @@ el('review-toggle').onclick=()=>{reviewExpanded=!reviewExpanded;el('review-files
 for(const action of ['undo','keep'])el('review-'+action).onclick=()=>post('reviewAction',{action,id:state.activeId,checkpointId:state.activeCheckpointId||null,revision:state.revision});
 el('review-open').onclick=()=>post('changes');
 const modelControls=()=>[el('model-fast'),el('model-choice'),...(!el('model-options').hidden?Array.from(el('model-options').children):[]),el('effort-slider'),el('model-load')].filter(e=>!e.disabled&&!e.hidden);
-el('model-toggle').onclick=e=>{const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)modelControls()[0]?.focus();};
+el('approval-toggle').onclick=()=>{const open=el('approval-panel').hidden;closeModel();closeMenu();el('approval-panel').hidden=!open;el('approval-toggle').setAttribute('aria-expanded',String(open));if(open){const selected=el('approval-panel').querySelector('[aria-checked=true]')||el('approval-user');(selected.disabled?el('approval-help'):selected).focus();}};
+for(const [id,value] of [['approval-user','user'],['approval-auto','auto_review']])el(id).onclick=()=>{post('approvalMode',{value});closeApproval(true);};
+el('approval-help').onclick=()=>post('openLink',{url:'https://learn.chatgpt.com/docs/sandboxing/auto-review'});
+el('approval-panel').onkeydown=e=>{const buttons=[el('approval-help'),el('approval-user'),el('approval-auto')].filter(b=>!b.disabled),index=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Tab'].includes(e.key)){e.preventDefault();buttons[(index+(e.key==='ArrowUp'||e.shiftKey?-1:1)+buttons.length)%buttons.length]?.focus();}};
+el('model-toggle').onclick=e=>{closeApproval();const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)modelControls()[0]?.focus();};
 el('model-toggle').onkeydown=e=>{if(e.key==='Tab'&&!el('model-panel').hidden){if(!e.shiftKey&&modelControls().length){e.preventDefault();modelControls()[0].focus();}else closeModel();}};
 el('model-load').onclick=()=>{el('model-load').disabled=true;el('model-note').textContent='正在加载可用模型…';post('reconnect');};
 el('model-fast').onclick=e=>{e.stopPropagation();post('serviceTier',{value:el('model-fast').getAttribute('aria-pressed')==='true'?'default':el('model-fast').dataset.tier});};
@@ -440,8 +448,8 @@ el('effort-slider').onchange=()=>{const option=el('effort').options[Number(el('e
 el('model-panel').addEventListener('keydown',e=>{if(e.key!=='Tab')return;const controls=modelControls();if(!controls.length){e.preventDefault();closeModel(true);return;}if(e.shiftKey&&document.activeElement===controls[0]){e.preventDefault();controls.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===controls.at(-1)){e.preventDefault();controls[0].focus();}});
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
-document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if(!el('model-panel').hidden)closeModel(true);if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
-document.addEventListener('click', e => { if(!el('model-panel').contains(e.target)&&!el('model-toggle').contains(e.target))closeModel();if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if(!el('approval-panel').hidden)closeApproval(true);if(!el('model-panel').hidden)closeModel(true);if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
+document.addEventListener('click', e => { if(!el('approval-panel').contains(e.target)&&!el('approval-toggle').contains(e.target))closeApproval();if(!el('model-panel').contains(e.target)&&!el('model-toggle').contains(e.target))closeModel();if (!el('menu').contains(e.target) && e.target !== el('more')) el('menu').hidden = true; if (!el('quick-actions').contains(e.target) && e.target !== el('input')) closeQuickActions(); });
 el('chat-tabs').addEventListener('keydown', e => {
   if (state.operationLocked || state.busy || state.reviewBusy || e.target.getAttribute('role') !== 'tab') return;
   const ids = state.openChatIds || [], index = ids.indexOf(e.target.dataset.chatId); let next;
