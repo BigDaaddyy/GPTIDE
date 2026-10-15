@@ -33,6 +33,8 @@
 
 ## 发布复核
 
+- 1.3.3：模型入口空目录和任务中均有反馈；网页核对实际选择消息及显式加载，原生窗口验证真实点击。网页3项及原生1项合计4/4通过，报告 `downloads/acceptance/1792059929203-23924/report.json`，截图 `model-picker-native.png`。模拟目录的可选模型不代表真实账号权限；未连接模型。语法、构建及运行包校验通过。
+
 - 1.3.2：147 项源码回归、语法/构建/运行包验证通过。最终离线验收网页3项、原生历史与文件操作2项，合计5/5通过，报告 `downloads/acceptance/1792059271098-33028/report.json`。截图 `model-picker-260.png` / `model-picker-300.png` / `model-picker-390.png`、`compact-chat-300.png`、`review-expanded-300.png`；覆盖实际目录档位、方向键/Tab/Esc、运行锁、默认折叠、展开差异、批量预检及实际 Undo/Keep 和历史持久化。不连接真实模型。
 
 - 1.3.1：147 项源码测试、语法/构建/运行包验证通过。网页 3 项通过报告 `downloads/acceptance/1792058012810-35548/`；原生历史与文件处理 2 项通过报告 `downloads/acceptance/1792058111925-30124/`，最终最新轮次兼容、真实 Reject/Accept 和手动修改保护复核通过报告 `downloads/acceptance/1792058432989-35864/`。简化列表截图见 `downloads/acceptance/1792058222128-26416/compact-chat-300.png`。只显示待处理文件与真实增删行数；处理后隐藏。源代码管理仍负责复杂操作。未连接真实模型。

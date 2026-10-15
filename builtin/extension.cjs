@@ -780,8 +780,8 @@ class Chat {
         if (msg.type === 'new') { if (!this.actionLocked() && !this.storageBlocked) this.newChat(); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'branch') { if (!this.branchChat(msg.id, msg.index, msg.revision)) { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
         if (msg.type === 'closeTab') { if (!this.actionLocked()) this.closeTab(msg.id, msg.draft); else { this.view?.webview.postMessage({ type: 'tabChangeRejected', projectKey: this.projectKey }); this.post(); } }
-        if (msg.type === 'model' && !this.actionLocked() && this.models.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); this.effort = require('./model-catalog.cjs').effort(model, this.effort); this.save(); this.post(); }
-        if (msg.type === 'effort' && !this.actionLocked() && this.models.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
+        if (msg.type === 'model' && !this.actionLocked() && this.models?.some(m => m.model === msg.value)) { this.model = msg.value; const model = this.models.find(m => m.model === msg.value); this.effort = require('./model-catalog.cjs').effort(model, this.effort); this.save(); this.post(); }
+        if (msg.type === 'effort' && !this.actionLocked() && this.models?.find(m => m.model === this.model)?.supportedReasoningEfforts?.some(e => e.reasoningEffort === msg.value)) { this.effort = msg.value; this.save(); this.post(); }
         if (msg.type === 'attach') await this.attachFiles();
         if (msg.type === 'attachCurrent') await this.attachFiles(true);
         if (msg.type === 'attachDiagnostics') await this.attachContext('diagnostics');

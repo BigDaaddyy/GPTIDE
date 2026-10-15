@@ -24,7 +24,8 @@ function previewEffort(){
   Array.from(el('effort-ticks').children).forEach((tick,i)=>{tick.style.visibility=i===Number(el('effort-slider').value)?'hidden':'visible';tick.style.background=i<Number(el('effort-slider').value)?'#ffffff66':'#a7aab280';});
   el('effort-slider').style.setProperty('--effort-fill',(Number(el('effort-slider').max)?100*Number(el('effort-slider').value)/Number(el('effort-slider').max):0)+'%');
 }
-function closeModel(focus=false){el('model-panel').hidden=true;el('model-toggle').setAttribute('aria-expanded','false');if(focus)el('model-toggle').focus();}
+function closeModelOptions(){el('model-options').hidden=true;el('model-choice').setAttribute('aria-expanded','false');}
+function closeModel(focus=false){closeModelOptions();el('model-panel').hidden=true;el('model-toggle').setAttribute('aria-expanded','false');if(focus)el('model-toggle').focus();}
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
 const pendingCopies=new Map();let copySequence=0;
@@ -275,8 +276,14 @@ function render(s) {
   el('model').disabled ||= !s.models.length; el('model').title = s.models.length ? '选择模型' : '默认模型；连接后确认可用性';
   el('effort').disabled = !!s.operationLocked || !!s.busy || !!s.reviewBusy || !s.models.find(m => m.model === s.model)?.supportedReasoningEfforts?.length;
   el('model-label').textContent=s.models.find(m=>m.model===s.model)?.displayName||s.model||'选择模型';
-  el('model-toggle').disabled=el('model').disabled;renderEffort();
-  if(el('model-toggle').disabled)closeModel();
+  el('model-toggle').disabled=!!s.loadingScope;renderEffort();
+  el('model-choice').textContent=el('model-label').textContent;el('model-choice').disabled=el('model').disabled;
+  if(el('model-choice').disabled)closeModelOptions();
+  el('model-options').replaceChildren(...s.models.map(model=>{const button=make('button','model-option',model.displayName||model.model);button.setAttribute('role','option');button.setAttribute('aria-selected',String(model.model===s.model));button.onclick=()=>{el('model').value=model.model;el('model').onchange();closeModelOptions();el('model-choice').focus();};return button;}));
+  el('model-note').hidden=!!s.models.length&&!el('model').disabled;
+  el('model-note').textContent=s.models.length?'当前操作完成后可切换模型':s.status&&s.status!=='加载中'?s.status:'尚未加载可用模型';
+  el('model-load').hidden=!!s.models.length;el('model-load').disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.loadingScope);
+  if(s.loadingScope)closeModel();
   if (!s.busy && s.mode) el('mode').value = previous.mode || s.mode;
   el('attachments').replaceChildren();
   el('settings').title=s.pinnedContext?.length?'项目固定引用：'+s.pinnedContext.join('、'):'会话与 Codex 配置';
@@ -415,11 +422,15 @@ el('model').onchange = () => post('model', { value: el('model').value }); el('ef
 el('review-toggle').onclick=()=>{reviewExpanded=!reviewExpanded;el('review-files').hidden=!reviewExpanded;el('review-toggle').setAttribute('aria-expanded',String(reviewExpanded));el('review-arrow').textContent=reviewExpanded?'⌄':'›';};
 for(const action of ['undo','keep'])el('review-'+action).onclick=()=>post('reviewAction',{action,id:state.activeId,checkpointId:state.activeCheckpointId||null,revision:state.revision});
 el('review-open').onclick=()=>post('changes');
-el('model-toggle').onclick=e=>{const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)el('model').focus();};
-el('model-toggle').onkeydown=e=>{if(e.key==='Tab'&&!el('model-panel').hidden){if(!e.shiftKey){e.preventDefault();el('model').focus();}else closeModel();}};
+const modelControls=()=>[el('model-choice'),...(!el('model-options').hidden?Array.from(el('model-options').children):[]),el('effort-slider'),el('model-load')].filter(e=>!e.disabled&&!e.hidden);
+el('model-toggle').onclick=e=>{const open=el('model-panel').hidden;closeMenu();closeQuickActions();el('model-panel').hidden=!open;el('model-toggle').setAttribute('aria-expanded',String(open));if(open&&e.detail===0)modelControls()[0]?.focus();};
+el('model-toggle').onkeydown=e=>{if(e.key==='Tab'&&!el('model-panel').hidden){if(!e.shiftKey&&modelControls().length){e.preventDefault();modelControls()[0].focus();}else closeModel();}};
+el('model-load').onclick=()=>{el('model-load').disabled=true;el('model-note').textContent='正在加载可用模型…';post('reconnect');};
+el('model-heading').onclick=()=>{if(el('model-choice').disabled)return;const open=el('model-options').hidden;el('model-options').hidden=!open;el('model-choice').setAttribute('aria-expanded',String(open));if(open)(el('model-options').querySelector('[aria-selected=true]')||el('model-options').firstElementChild)?.focus();};
+el('model-options').onkeydown=e=>{const choices=Array.from(el('model-options').children),index=choices.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();choices[e.key==='Home'?0:e.key==='End'?choices.length-1:(index+(e.key==='ArrowDown'?1:-1)+choices.length)%choices.length]?.focus();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeModelOptions();el('model-choice').focus();}};
 el('effort-slider').oninput=previewEffort;
 el('effort-slider').onchange=()=>{const option=el('effort').options[Number(el('effort-slider').value)];if(option&&!el('effort-slider').disabled){el('effort').value=option.value;post('effort',{value:option.value});}};
-el('model-panel').addEventListener('keydown',e=>{if(e.key!=='Tab')return;const controls=[el('model'),el('effort-slider')].filter(e=>!e.disabled);if(!controls.length)return;if(e.shiftKey&&document.activeElement===controls[0]){e.preventDefault();controls.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===controls.at(-1)){e.preventDefault();controls[0].focus();}});
+el('model-panel').addEventListener('keydown',e=>{if(e.key!=='Tab')return;const controls=modelControls();if(!controls.length){e.preventDefault();closeModel(true);return;}if(e.shiftKey&&document.activeElement===controls[0]){e.preventDefault();controls.at(-1).focus();}else if(!e.shiftKey&&document.activeElement===controls.at(-1)){e.preventDefault();controls[0].focus();}});
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); showFind(); } if (e.key === 'Escape') { if(!el('model-panel').hidden)closeModel(true);if (!el('menu').hidden) closeMenu(true); if (!el('history-panel').hidden) closeHistory(); if (!el('find-bar').hidden) closeFind(); } });
