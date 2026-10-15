@@ -2,7 +2,6 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const { isUtf8 } = require('node:buffer'); const review = require('./review.cjs');
 const HASH = /^[a-f0-9]{64}$/, FILE_LIMIT = 512 * 1024;
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
-const lines = value => value ? value.split('\n').length : 0;
 class Checkpoints {
   constructor(directory, project, projectKey, maximumBytes = 128 * 1024 * 1024) {
     this.directory = directory; this.project = path.resolve(project); this.projectKey = projectKey; this.maximumBytes = maximumBytes;
@@ -55,7 +54,7 @@ class Checkpoints {
     for (const change of changes) {
       if (typeof change.path !== 'string' || !review.within(this.project, change.path) || change.before === change.after) continue;
       if (![change.before, change.after].every(v => v === null || typeof v === 'string')) continue;
-      result.push({ relative: path.relative(this.project, change.path), beforeRef: this.put(change.before), afterRef: this.put(change.after), added: lines(change.after), removed: lines(change.before), status: ['pending', 'accepted', 'reverted'].includes(change.status) ? change.status : 'pending' });
+      result.push({ relative: path.relative(this.project, change.path), beforeRef: this.put(change.before), afterRef: this.put(change.after), ...require('./diff-stats.cjs').stats(change.before,change.after),statsVersion:1, status: ['pending', 'accepted', 'reverted'].includes(change.status) ? change.status : 'pending' });
     }
     return { id: crypto.randomUUID(), projectKey: this.projectKey, turn, createdAt: Date.now(), limited: !!limited, changes: result };
     });
@@ -67,7 +66,8 @@ class Checkpoints {
       const file = path.resolve(this.project, change.relative), relative = path.relative(this.project, file);
       if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('检查点文件路径越界');
       if (![change.beforeRef, change.afterRef].every(ref => ref === null || typeof ref === 'string' && HASH.test(ref))) throw new Error('检查点内容引用无效');
-      return { ...change, path: file, relative };
+      const counts=change.statsVersion===1?{}:require('./diff-stats.cjs').stats(this.get(change.beforeRef),this.get(change.afterRef));
+      return { ...change,...counts,statsVersion:1, path: file, relative };
     });
   }
   materialize(change) { return 'beforeRef' in change ? { ...change, before: this.get(change.beforeRef), after: this.get(change.afterRef) } : change; }

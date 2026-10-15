@@ -12,7 +12,7 @@ let state = { busy: false, chats: [], messages: [] }, optionsSignature = '', rev
 const messageRows = new Map(); let renderedChat, visibleMessages = 100, layoutKey;
 const taskRows = new Map(); let taskChat;
 const pendingCopies=new Map();let copySequence=0;
-let showTasks=false,reviewChat;
+let showTasks=false;
 let tabsSignature, messageAnchor = null, findPosition = 0, findHits = [], findQuery = '', findTimer, findChat, taskFilterSignature;
 const findCache = new Map();
 let quickRows = [], quickIndex = 0, quickSignature = '', quickDismissed;
@@ -230,7 +230,6 @@ function render(s) {
   el('chat-title').textContent = chat?.name || '新对话'; el('status').textContent = s.status; el('status').title = s.status;
   el('status').hidden=!s.storageBlocked&&!/失败|错误|未能|拒绝|已变化|已有后续修改|无法|不可用|未确认/.test(s.status||'');
   el('more').title=s.status||'更多操作';
-  if(reviewChat!==s.activeId){reviewChat=s.activeId;el('review-details').hidden=true;el('review-toggle').setAttribute('aria-expanded','false');}
   el('connection').classList.toggle('connected', s.connected === true); el('connection').title = s.loginPending ? '等待 ChatGPT 登录' : s.connected ? 'ChatGPT 已连接' : '未连接'; el('plan').textContent = s.account?.plan ? s.account.plan.toUpperCase() : s.preferences?.autoConnect === false ? '离线' : '未登录';
   el('login').textContent = s.loginPending ? '等待 ChatGPT 登录…' : ['chatgpt', 'chatgptAuthTokens'].includes(s.account?.type) ? '切换 ChatGPT 账号' : 'ChatGPT 登录';
   el('login').disabled = !!s.operationLocked;
@@ -264,20 +263,13 @@ function render(s) {
   el('settings').title=s.pinnedContext?.length?'项目固定引用：'+s.pinnedContext.join('、'):'会话与 Codex 配置';
   el('settings').textContent=s.pinnedContext?.length?'设置 · '+s.pinnedContext.length+' 项固定引用':'设置';
   for (const attachment of s.attachments || []) { const chip = make('span', 'file-chip', attachment.label), remove = make('button', '', '×'); remove.disabled = s.busy; remove.title = '移除引用'; remove.onclick = () => post('removeAttachment', { id: attachment.id }); chip.append(remove); el('attachments').append(chip); }
-  const checkpoints = s.checkpoints || [], reviews = JSON.stringify([s.changes, checkpoints, s.activeCheckpointId, s.busy, s.reviewBusy]); if (reviews !== reviewSignature) {
-    reviewSignature = reviews; el('review').hidden = !s.changes?.length && !checkpoints.length; el('review-count').textContent = `${s.changes?.length || 0} 个文件`; el('review-files').replaceChildren();
-    el('checkpoint-select').replaceChildren();
-    if (!s.activeCheckpointId && s.changes?.length) el('checkpoint-select').add(new Option('当前改动', 'current'));
-    for (const checkpoint of [...checkpoints].reverse()) el('checkpoint-select').add(new Option(`${checkpoint.legacy ? '旧版记录' : '第 ' + checkpoint.turn + ' 轮'} · ${checkpoint.count} 文件${checkpoint.limited ? '（部分）' : ''}`, checkpoint.id));
-    el('checkpoint-select').value = s.activeCheckpointId || 'current'; el('checkpoint-select').disabled = s.operationLocked || s.busy || s.reviewBusy;
-    for (const change of s.changes || []) { const row = make('div', 'review-row'), file = make('button', 'review-path', change.relative); file.title = '查看修改差异'; file.onclick = () => post('diff', { path: change.path }); row.append(file);
-      const actions = change.status === 'pending' ? [['Keep', 'accept'], ['Undo', 'revert']] : change.status === 'accepted' ? [['Undo', 'revert']] : [['Redo', 'redo']];
-      if (change.status !== 'pending') row.append(make('span', 'review-status', change.status === 'accepted' ? '已保留' : '已撤销'));
-      for (const [label, type] of actions) { const button = make('button', 'text-button', label); button.disabled = s.operationLocked || s.busy || s.reviewBusy; button.onclick = () => post(type, { path: change.path }); row.append(button); }
-      const current = make('button', 'text-button', '当前'); current.title = '此轮修改后与当前文件比较'; current.onclick = () => post('diffCurrent', { path: change.path }); row.append(current); el('review-files').append(row);
+  const pending=(s.changes||[]).filter(change=>change.status==='pending'),signature=JSON.stringify([s.activeId,s.revision,s.activeCheckpointId,pending,s.operationLocked,s.busy,s.reviewBusy,s.storageBlocked]);
+  if(signature!==reviewSignature){reviewSignature=signature;el('review').hidden=!pending.length;el('review-files').replaceChildren();
+    for(const change of pending){const row=make('div','review-row'),file=make('span','review-path',change.relative),counts=make('span','review-counts');file.title=change.relative;
+      const prefix=change.approximate?'~':'';counts.append(make('span','review-added',prefix+'+'+(change.added??0)),make('span','review-removed',prefix+'−'+(change.removed??0)));counts.title=(change.approximate?'估算行数 · ':'')+'新增 / 删除行数';row.append(file,counts);
+      for(const [label,action,title] of [['×','reject','Reject'],['✓','accept','Accept']]){const button=make('button','review-decision review-'+action,label);button.title=title;button.setAttribute('aria-label',title+' '+change.relative);button.disabled=!!(s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked);button.onclick=()=>post('reviewDecision',{action,path:change.path,id:s.activeId,checkpointId:s.activeCheckpointId||null,revision:s.revision});row.append(button);}el('review-files').append(row);
     }
   }
-  const reviewLocked=s.operationLocked||s.busy||s.reviewBusy||s.storageBlocked;el('review-undo').disabled=reviewLocked||!(s.changes||[]).some(c=>['pending','accepted'].includes(c.status));el('review-keep').disabled=reviewLocked||!(s.changes||[]).some(c=>c.status==='pending');el('review-undo').title=(s.changes||[]).filter(c=>['pending','accepted'].includes(c.status)).length>1?'选择文件撤销':'撤销此文件修改';
   if (!el('history-panel').hidden) renderHistory();
   if (s.focusRequestId && s.focusRequestId !== handledFocusId && !el('input').disabled) { handledFocusId = s.focusRequestId; closeMenu(); if (!el('history-panel').hidden) closeHistory(); el('input').focus(); post('focusHandled', { id: s.focusRequestId }); }
   updateQuickActions();
@@ -387,9 +379,7 @@ el('more').onclick = () => { const open = el('menu').hidden; closeHistory(); el(
 el('history').onclick = () => { const open = el('history-panel').hidden; closeMenu(); el('history-panel').hidden = !open; el('history').setAttribute('aria-expanded', String(open)); renderHistory(); if (open) el('history-search').focus(); else el('history').focus(); };
 el('menu').addEventListener('keydown', e => { if(e.target.tagName==='SELECT')return;if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return; e.preventDefault(); const buttons = [...el('menu').querySelectorAll('button:not(:disabled)')], index = buttons.indexOf(document.activeElement); const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length; buttons[next]?.focus(); });
 el('task-toggle').onclick=()=>{showTasks=true;renderTasks(state);el('task-panel').open=true;closeMenu();el('task-panel').querySelector('summary').focus();};
-for(const [id,action] of [['review-undo','undo'],['review-keep','keep']])el(id).onclick=()=>post('reviewAction',{action,id:state.activeId,checkpointId:state.activeCheckpointId||null,revision:state.revision});
 el('history-archived').onclick=()=>{historyArchived=!historyArchived;renderHistory();};
-el('review-toggle').onclick=()=>{el('review-details').hidden=!el('review-details').hidden;el('review-toggle').setAttribute('aria-expanded',String(!el('review-details').hidden));};
 el('find').onclick = () => { el('menu').hidden = true; showFind(); };
 el('find-query').oninput = () => { clearTimeout(findTimer); findTimer = setTimeout(() => updateFind(true), 120); };
 el('find-query').onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); moveFind(e.shiftKey ? -1 : 1); } };
@@ -397,9 +387,8 @@ el('find-prev').onclick = () => moveFind(-1); el('find-next').onclick = () => mo
 el('task-filter').onchange = () => renderTasks(state);
 el('task-failures').onclick = () => { el('task-failures').setAttribute('aria-pressed', String(el('task-failures').getAttribute('aria-pressed') !== 'true')); renderTasks(state); };
 el('task-copy').onclick = () => post('copyTasks', { ids: [...taskRows.entries()].filter(([, row]) => !row.node.hidden).map(([id]) => id) });
-el('checkpoint-select').onchange = () => { if (el('checkpoint-select').value !== 'current') post('checkpoint', { id: el('checkpoint-select').value }); };
 el('close-history').onclick = closeHistory; el('history-search').oninput = renderHistory;
-for (const id of ['new', 'refresh', 'login', 'folder', 'changes', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
+for (const id of ['new', 'refresh', 'login', 'folder', 'terminal', 'rename', 'delete', 'attach', 'attachCurrent', 'settings', 'usage', 'attachDiagnostics', 'attachGitDiff', 'attachFolder', 'export']) el(id).onclick = () => { flushDraft(); if (id === 'new') beginTabChange(); post(id); el('menu').hidden = true; };
 el('model').onchange = () => post('model', { value: el('model').value }); el('effort').onchange = () => post('effort', { value: el('effort').value }); el('mode').onchange = () => { previous.mode = el('mode').value; resizeInput(); };
 el('messages').onscroll = () => { const b = el('messages'); el('scroll-bottom').hidden = b.scrollHeight - b.scrollTop - b.clientHeight < 100; };
 el('scroll-bottom').onclick = () => { if (messageAnchor !== null) { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); } el('messages').scrollTop = el('messages').scrollHeight; };

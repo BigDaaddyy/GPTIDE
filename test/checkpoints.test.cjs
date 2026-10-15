@@ -46,3 +46,7 @@ test('cache cleanup protects retained and recent content and only removes old un
   assert.equal(store.get(keep.changes[0].afterRef), 'keep');
   assert.equal(store.get(recent.changes[0].afterRef), 'recent');
 }));
+
+test('legacy total-file line counts are recalculated without changing stored checkpoint data',()=>fixture((store,project)=>{
+ const record=store.create([{path:path.join(project,'a.txt'),before:'same\nold\nsame\n',after:'same\nnew\nsame\n'}]);delete record.changes[0].statsVersion;record.changes[0].added=100;record.changes[0].removed=100;const loaded=store.load(record)[0];assert.equal(loaded.added,1);assert.equal(loaded.removed,1);assert.equal(loaded.statsVersion,1);assert.equal(record.changes[0].added,100);
+}));
