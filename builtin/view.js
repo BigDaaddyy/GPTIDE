@@ -131,25 +131,35 @@ function renderMessages(s) {
   let newer = box.querySelector('.return-latest');
   if (end < s.messages.length && !newer) newer = make('button', 'return-latest text-button', '返回最新消息');
   if (newer) { newer.hidden = end === s.messages.length; newer.onclick = () => { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); box.scrollTop = box.scrollHeight; }; }
-  const visible = new Set();
+  const visible = new Set(), roundEnds = []; let ending = s.messages.length - 1;
+  for (let i = s.messages.length - 1; i >= 0; i--) { if (s.messages[i + 1]?.role === 'user') ending = i; roundEnds[i] = ending; }
   for (let index = start; index < end; index++) {
     const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
     const signature = JSON.stringify(message); let row = messageRows.get(key);
-    if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
+    const roundEnd = index === s.messages.length - 1 || s.messages[index + 1].role === 'user';
+    if (row) { row.item.dataset.messageIndex = String(index); row.item.dataset.roundEnd = String(roundEnds[index]); row.role.hidden = !roundEnd; row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
       content(row.body, message.text); updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
     }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GPTIDE');
+    role.hidden = !roundEnd;
     item.dataset.messageIndex = String(index);
+    item.dataset.roundEnd = String(roundEnds[index]);
+    const hoverRound = value => { for (const candidate of messageRows.values()) if (candidate.item.dataset.roundEnd === item.dataset.roundEnd) candidate.item.classList.toggle('round-hover', value); };
+    item.onmouseenter = () => hoverRound(true); item.onmouseleave = () => hoverRound(false);
     if (message.mode) role.append(make('span', 'badge', message.mode));
-    const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
+    const copy = make('button', 'copy-message', '复制'); copy.onclick = () => {
+      const last = Number(item.dataset.messageIndex); let first = last;
+      if (state.messages[last]?.role !== 'user') while (first > 0 && state.messages[first - 1].role !== 'user') first--;
+      post('copy', { text: state.messages.slice(first, last + 1).map(m => m.text || '').join('\n\n') });
+    }; role.append(copy);
     const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked;
     branch.onclick = () => { flushDraft(); beginTabChange(); post('branch', { id: state.activeId, index: Number(item.dataset.messageIndex), revision: state.revision }); }; role.append(branch);
     const time = make('time', 'message-time'); updateMessageTime(time, message.createdAt); role.append(time);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    row = { item, body, signature, message, branch, time }; messageRows.set(key, row);
+    row = { item, body, signature, message, branch, time, role }; messageRows.set(key, row);
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.

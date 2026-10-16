@@ -13,13 +13,18 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     assert.equal(await page.locator('#usage-summary').count(),0,'Quota belongs in the editor status bar');
     await publish({messages:[{role:'user',text:'时间与消息操作',createdAt:'2026-10-16T10:20:30Z'},{role:'assistant',text:'回复',createdAt:1792146030000}]});
     await page.locator('#input').hover();
-    for (const role of ['user','assistant']) {
+    assert.equal(await page.locator('.message.user .role').isHidden(),true);
+    for (const role of ['assistant']) {
       const row=page.locator('.message.'+role);assert.equal(await row.locator('.copy-message').evaluate(e=>getComputedStyle(e).opacity),'1');assert.equal(await row.locator('.branch-message').evaluate(e=>getComputedStyle(e).opacity),'1');
       assert.equal(await row.locator('.message-time').evaluate(e=>getComputedStyle(e).opacity),'0');await row.hover();await page.waitForTimeout(180);
       assert.equal(await row.locator('.message-time').evaluate(e=>getComputedStyle(e).opacity),'1');assert.match(await row.locator('.message-time').textContent(),/2026.*\d{2}:\d{2}:\d{2}/);
       const geometry=await row.evaluate(e=>{const a=e.querySelector('.copy-message').getBoundingClientRect(),b=e.querySelector('.message-time').getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2);});assert.ok(geometry<2,'Timestamp and controls must share one row');await page.locator('#input').hover();await page.waitForTimeout(180);
     }
     await page.screenshot({path:path.join(env.artifacts,'message-actions-always-visible.png')});await publish();
+    await publish({messages:[{role:'user',text:'第一轮'},{role:'assistant',text:'第一段'},{role:'assistant',text:'第二段',createdAt:'2026-10-16T10:20:30Z'},{role:'user',text:'第二轮'},{role:'assistant',text:'新的回复',createdAt:'2026-10-16T10:21:30Z'}]});
+    assert.equal(await page.locator('.role:not([hidden])').count(),2);await page.locator('.copy-message:visible').first().click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).text),'第一段\n\n第二段');
+    await page.locator('.message').first().hover();await page.waitForTimeout(180);assert.equal(await page.locator('.message-time').nth(2).evaluate(e=>getComputedStyle(e).opacity),'1');assert.equal(await page.locator('.message-time').nth(4).evaluate(e=>getComputedStyle(e).opacity),'0');
+    await page.screenshot({path:path.join(env.artifacts,'round-actions.png')});await publish();
     await page.setViewportSize({width:260,height:500});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth),0);
     await page.screenshot({path:path.join(env.artifacts,'usage-260.png')});await page.setViewportSize({width:390,height:780});
     const snippet=Array.from({length:40},(_,i)=>'const 名字'+i+' = "<script>&"; // comment').join('\n');
