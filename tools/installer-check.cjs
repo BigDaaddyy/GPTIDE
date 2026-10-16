@@ -17,6 +17,7 @@ async function runtimeClosed(){
   assert.ok(!fs.existsSync(path.join(installed,'app/VSCodium.exe')));
   const roaming=path.join(testRoot,'Roaming'),home=path.join(testRoot,'home'),data=path.join(roaming,'GPTIDE'),extensions=path.join(home,'.gptide/extensions');
   fs.mkdirSync(home,{recursive:true});
+  fs.writeFileSync(path.join(data,'.legacy-migrated.json'),'{ interrupted migration');
   fs.mkdirSync(path.join(roaming,'Cursor/User/snippets'),{recursive:true});fs.writeFileSync(path.join(roaming,'Cursor/User/settings.json'),'{}');
   const { playwright } = require('./acceptance-env.cjs');
   const processEnv={...process.env,APPDATA:roaming,USERPROFILE:home,GPTIDE_DATA_HOME:data,GPTIDE_EXTENSIONS_HOME:extensions,CODEX_HOME:path.join(testRoot,'empty-codex-home')};delete processEnv.ELECTRON_RUN_AS_NODE;
@@ -31,6 +32,8 @@ async function runtimeClosed(){
     assert.ok(!fs.existsSync(path.join(installed,'data')),'No personal data in install directory');
   } finally {await app.close();await runtimeClosed();}
   const settings=path.join(data,'User/settings.json'),marker=path.join(data,'projects/test-only.json');
+  assert.ok(JSON.parse(fs.readFileSync(path.join(data,'.legacy-migrated.json'))).from);
+  assert.ok(fs.readdirSync(data).some(name=>name.startsWith('.legacy-migrated.json.invalid-')));
   assert.equal(JSON.parse(fs.readFileSync(settings))['telemetry.telemetryLevel'],'off');
   fs.mkdirSync(path.dirname(marker),{recursive:true});fs.writeFileSync(marker,JSON.stringify({fixture:true}));
   const customized={...JSON.parse(fs.readFileSync(settings)),'editor.fontSize':19,fixture:true};fs.writeFileSync(settings,JSON.stringify(customized));
@@ -42,6 +45,6 @@ async function runtimeClosed(){
   await waitFor(()=>!fs.existsSync(path.join(installed,'app')),'卸载程序文件');
   assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);
   assert.equal(JSON.parse(fs.readFileSync(settings)).fixture,true);
-  const report={version,installed:true,upgradePreservesData:true,guiLaunched:true,uninstallPreservesData:true,firstRunImportPrompt:true,promptNotRepeated:true,userDataOutsideProgram:true,testRoot};
+  const report={version,installed:true,upgradePreservesData:true,guiLaunched:true,uninstallPreservesData:true,firstRunImportPrompt:true,promptNotRepeated:true,userDataOutsideProgram:true,startupRecoveredCorruptMarker:true,testRoot};
   fs.writeFileSync(path.join(output,'installer-check.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 })().catch(error=>{console.error(error);process.exitCode=1;});
