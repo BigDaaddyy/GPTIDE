@@ -3,6 +3,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const app = path.join(root, 'app');
 if (!fs.existsSync(path.join(app, 'VSCodium.exe'))) throw new Error('请先解压官方 VSCodium 完整 Windows 运行包到 app 目录');
+fs.copyFileSync(path.join(root,'assets/logo.svg'),path.join(app,'resources/app/out/media/code-icon.svg'));
 // Apply the same brand to native windows and the Windows executable.
 for (const [from,to] of [['icon.ico','win32/code.ico'],['icon.png','win32/code_150x150.png'],['icon.png','win32/code_70x70.png']]) fs.copyFileSync(path.join(root,'assets',from),path.join(app,'resources/app/resources',to));
 const brandedExe=path.join(app,'GPTIDE.exe'), iconStamp=path.join(app,'.gptide-icon-sha256'), iconHash=require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(root,'assets/icon.ico'))).update(fs.readFileSync(path.join(app,'VSCodium.exe'))).digest('hex');

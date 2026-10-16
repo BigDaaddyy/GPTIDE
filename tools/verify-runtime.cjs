@@ -1,5 +1,6 @@
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const root = path.resolve(__dirname, '..'), base = path.join(root, 'app/resources/app'), manifest = require('../package.json'), builtin = require('../builtin/package.json');
+if (!fs.readFileSync(path.join(root,'assets/logo.svg')).equals(fs.readFileSync(path.join(base,'out/media/code-icon.svg')))) throw Error('左上角图标与源码不一致');
 if (manifest.version !== builtin.version) throw Error('源码版本不一致');
 if (!fs.readFileSync(path.join(root,'assets/icon.ico')).equals(fs.readFileSync(path.join(base,'resources/win32/code.ico')))) throw Error('应用图标与源码不一致');
 if (!fs.existsSync(path.join(root, 'app/GPTIDE.exe')) || !fs.existsSync(path.join(root,'runtime/node.exe'))) throw Error('完整运行包或 Node 运行时缺失');
