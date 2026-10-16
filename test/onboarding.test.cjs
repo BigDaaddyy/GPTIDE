@@ -5,7 +5,7 @@ test('first installed start detects both profiles, asks before importing, and re
   fs.writeFileSync(path.join(root,'installation.ini'),'[GPTIDE]');const env={APPDATA:path.join(root,'Roaming'),USERPROFILE:path.join(root,'home')};
   for(const source of ['Code','Cursor'])fs.mkdirSync(path.join(env.APPDATA,source,'User'),{recursive:true});
   let saved,asked=0;const context={globalState:{get:()=>saved,update:async(_key,value)=>{saved=value;}}};
-  const vscode={window:{showInformationMessage:async text=>{asked++;assert.match(text,/VS Code 和 Cursor/);return'暂不导入';}}};
+  const vscode={window:{showInformationMessage:async text=>{assert.equal(saved,true,'Persist before showing the prompt');asked++;assert.match(text,/VS Code 和 Cursor/);return'暂不导入';}}};
   await onboarding.run(vscode,context,root,env);await onboarding.run(vscode,context,root,env);assert.equal(asked,1);assert.equal(saved,true);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

@@ -11,8 +11,7 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "GPTIDE contributors"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\GPTIDE"
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
-SetCompressorDictSize 32
+SetCompressor zlib
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ICON "${SOURCE}\assets\icon.ico"
