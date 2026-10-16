@@ -17,7 +17,7 @@ async function runImport(vscode, root, targetDirectory) {
   const plan = core.scan(user, extensions);
   const choices = [{ label: '设置', description: `${Object.keys(plan.settings).length} 项`, kind: 'settings', picked: true }, { label: '快捷键', description: `${plan.keybindings.length} 项`, kind: 'keys', picked: true }, ...plan.plugins.map(p => ({ label: p.id, description: p.manifest.version, plugin: p, picked: true }))];
   const selected = await vscode.window.showQuickPick(choices, { canPickMany: true, title: '选择导入内容', placeHolder: user }); if (!selected?.length) return;
-  const mode = selected.some(s => s.kind) ? await vscode.window.showQuickPick(['保留 GptIDE 已有设置', '同名设置使用 VS Code 的值'], { title: '设置冲突处理' }) : '保留 GptIDE 已有设置'; if (!mode) return;
+  const mode = selected.some(s => s.kind) ? await vscode.window.showQuickPick(['保留 GPTIDE 已有设置', '同名设置使用 VS Code 的值'], { title: '设置冲突处理' }) : '保留 GPTIDE 已有设置'; if (!mode) return;
   const backup = path.join(root, 'data', 'imports', crypto.randomUUID()); fs.mkdirSync(backup, { recursive: true });
   const failures = [...plan.warnings], installed = []; let settingCount = 0, keyCount = 0;
   let canceled = false;

@@ -40,7 +40,7 @@ class Bridge extends EventEmitter {
     this.child.stderr.on('error', e => this.fail(e));
     this.child.stderr.on('data', d => { this.lastDiagnostic = String(d).slice(-2000); });
     createInterface({ input: this.child.stdout }).on('error', e => this.fail(e)).on('line', line => this.receive(line));
-    await this.call('initialize', { clientInfo: { name: 'gptide_desktop', title: 'GptIDE', version: require('./package.json').version } });
+    await this.call('initialize', { clientInfo: { name: 'gptide_desktop', title: 'GPTIDE', version: require('./package.json').version } });
     this.send({ method: 'initialized', params: {} });
     return this;
   }

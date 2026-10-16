@@ -80,7 +80,7 @@ function renderHistory() {
   el('history-archived').setAttribute('aria-pressed',String(historyArchived));el('history-archived').textContent=historyArchived?'返回对话':'Archived';
   if(!chats.length)list.append(make('div','history-empty',search?'没有匹配的对话':historyArchived?'没有归档对话':'这个项目还没有聊天记录'));
   for(const chat of chats){
-    const row=make('div','history-row'+(state.activeId===chat.id?' active':'')),open=make('button','history-open'),name=make('span','name',(chat.pinned?'⌖ ':'')+chat.name),meta=make('span','meta',(chat.hasDraft?'草稿':chat.source==='cursor'?'Cursor':'GptIDE')+' · '+chat.count+' 条消息'),actions=make('div','history-actions'),menu=make('div','history-item-menu');menu.hidden=true;open.append(name,meta);
+    const row=make('div','history-row'+(state.activeId===chat.id?' active':'')),open=make('button','history-open'),name=make('span','name',(chat.pinned?'⌖ ':'')+chat.name),meta=make('span','meta',(chat.hasDraft?'草稿':chat.source==='cursor'?'Cursor':'GPTIDE')+' · '+chat.count+' 条消息'),actions=make('div','history-actions'),menu=make('div','history-item-menu');menu.hidden=true;open.append(name,meta);
     row.dataset.chatId=chat.id;open.dataset.historyAction='open';const locked=!!(state.operationLocked||state.busy||state.storageBlocked);open.disabled=locked;
     open.onclick=()=>{flushDraft();if(chat.id!==state.activeId)beginTabChange();post('select',{id:chat.id});closeHistory();};
     const action=(label,title,type,value)=>{const button=make('button','history-action',label);button.dataset.historyAction=type||'options';button.title=title;button.setAttribute('aria-label',title);button.disabled=locked;button.onclick=()=>{flushDraft();post(type,{id:chat.id,value});};actions.append(button);return button;};
@@ -134,7 +134,7 @@ function renderMessages(s) {
     if (row) {
       content(row.body, message.text); row.signature = signature; row.message = message; continue;
     }
-    const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GptIDE');
+    const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GPTIDE');
     item.dataset.messageIndex = String(index);
     if (message.mode) role.append(make('span', 'badge', message.mode));
     const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
@@ -241,6 +241,14 @@ function render(s) {
   }
   if (pendingFocusChat) { const target = [...el('chat-tabs').querySelectorAll('[role="tab"]')].find(b => b.dataset.chatId === pendingFocusChat); target?.focus(); pendingFocusChat = undefined; }
   renderMessages(s); renderTasks(s); state = s;
+  const usageWindows = s.usage?.windows || [], summary = el('usage-windows'); summary.replaceChildren();
+  for (const w of usageWindows) {
+    const fresh = w.state === 'cached', item = make('span', 'usage-window');
+    item.append(make('span', '', w.label), make('strong', '', fresh ? w.remainingPercent + '% 剩余' : '待更新'));
+    const meter = make('span', 'usage-meter'), fill = make('span'); fill.style.width = (fresh ? w.remainingPercent : 0) + '%'; meter.append(fill); item.append(meter); summary.append(item);
+  }
+  if (!usageWindows.length) summary.textContent = '暂无记录 · 点击查看';
+  el('usage-summary').title = s.usage?.timestamp ? '本机缓存 · 非实时\n' + new Date(s.usage.timestamp).toLocaleString() + '\n点击查看重置时间与详情' : '点击查看本机用量；不发起模型请求';
   updateFind(false);
   el('input').disabled = pendingTabChange || !!s.loadingScope || !!s.storageBlocked;
   const chat = s.chats.find(c => c.id === s.activeId);
@@ -255,7 +263,8 @@ function render(s) {
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
-  for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.operationLocked || s.busy || s.reviewBusy;
+  el('usage-summary').onclick = () => post('usage');
+for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.operationLocked || s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
   syncSend();
   el('send').setAttribute('aria-label', s.busy ? '停止生成' : '发送消息');

@@ -8,11 +8,11 @@ function render() {
   this.enabled = !hasProject;
   if (hasProject) return;
   const commands = this.instantiationService.invokeFunction(accessor => accessor.get(Ie));
-  const home = document.createElement('section'); home.className = 'gptide-home'; home.setAttribute('aria-label', 'GptIDE 项目首页');
+  const home = document.createElement('section'); home.className = 'gptide-home'; home.setAttribute('aria-label', 'GPTIDE 项目首页');
   const make = (tag, className, text, parent) => { const node = document.createElement(tag); node.className = className; if (text) node.textContent = text; parent.append(node); return node; };
   const run = (command, ...args) => commands.executeCommand(command, ...args).catch(() => commands.executeCommand('gptide.homeError', command));
   const brand = make('div', 'gptide-home-brand', '', home);
-  make('span', 'gptide-home-mark', 'G', brand); make('h1', '', 'GptIDE', brand);
+  make('span', 'gptide-home-mark', '', brand); make('h1', '', 'GPTIDE', brand);
   const meta = make('div', 'gptide-home-meta', '', home);
   const account = make('button', '', 'GPT 账户', meta); account.onclick = () => run('gptide.homeAccount');
   make('span', '', '·', meta); const settings = make('button', '', '设置', meta); settings.onclick = () => run('gptide.settings');

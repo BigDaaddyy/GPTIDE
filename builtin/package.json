@@ -1,8 +1,8 @@
 {
   "name": "gptide-chat",
-  "displayName": "GptIDE 内置聊天",
+  "displayName": "GPTIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -43,73 +43,73 @@
       },
       {
         "command": "gptide.importVSCode",
-        "title": "GptIDE: 导入 VS Code 设置和插件"
+        "title": "GPTIDE: 导入 VS Code 设置和插件"
       },
       {
         "command": "gptide.open",
-        "title": "GptIDE: 打开 AI 聊天",
+        "title": "GPTIDE: 打开 AI 聊天",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.login",
-        "title": "GptIDE: 使用 ChatGPT 登录",
+        "title": "GPTIDE: 使用 ChatGPT 登录",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.refresh",
-        "title": "GptIDE: 重新读取项目进度",
+        "title": "GPTIDE: 重新读取项目进度",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.attachSelection",
-        "title": "GptIDE: 引用当前代码",
+        "title": "GPTIDE: 引用当前代码",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.inlineEdit",
-        "title": "GptIDE: 改写选中代码（Ctrl+K）",
+        "title": "GPTIDE: 改写选中代码（Ctrl+K）",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.newChat",
-        "title": "GptIDE: 新建对话",
+        "title": "GPTIDE: 新建对话",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.usage",
-        "title": "GptIDE: 快速查看用量"
+        "title": "GPTIDE: 快速查看用量"
       },
       {
         "command": "gptide.settings",
-        "title": "GptIDE: 会话与 Codex 配置"
+        "title": "GPTIDE: 会话与 Codex 配置"
       },
       {
         "command": "gptide.diagnostics",
-        "title": "GptIDE: 本机诊断"
+        "title": "GPTIDE: 本机诊断"
       },
       {
         "command": "gptide.attachDiagnostics",
-        "title": "GptIDE: 引用项目诊断",
+        "title": "GPTIDE: 引用项目诊断",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.attachGitDiff",
-        "title": "GptIDE: 引用 Git 差异",
+        "title": "GPTIDE: 引用 Git 差异",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.attachFolder",
-        "title": "GptIDE: 引用文件夹",
+        "title": "GPTIDE: 引用文件夹",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.exportChat",
-        "title": "GptIDE: 导出当前项目对话",
+        "title": "GPTIDE: 导出当前项目对话",
         "enablement": "workspaceFolderCount == 1"
       },
       {
         "command": "gptide.cleanupCheckpoints",
-        "title": "GptIDE: 清理未引用的检查点缓存",
+        "title": "GPTIDE: 清理未引用的检查点缓存",
         "enablement": "workspaceFolderCount == 1"
       },
       {
@@ -220,7 +220,7 @@
       "secondarySidebar": [
         {
           "id": "gptide",
-          "title": "GptIDE",
+          "title": "GPTIDE",
           "icon": "icon.svg"
         }
       ]
@@ -236,7 +236,7 @@
       ]
     },
     "configuration": {
-      "title": "GptIDE",
+      "title": "GPTIDE",
       "properties": {
         "gptide.codexPath": {
           "type": "string",

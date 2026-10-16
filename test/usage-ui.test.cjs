@@ -6,8 +6,8 @@ function setup(root, now) {
   const values = {}, bar = { show() {}, hide() {}, dispose() {} }, context = { subscriptions: [] }, commands = new Map(); let interval, change, clears = 0;
   const clock = { now: () => now.value, setInterval: callback => { interval = callback; return 1; }, clearInterval: () => { clears++; } };
   const vscode = { StatusBarAlignment: { Right: 1 }, window: { createStatusBarItem: () => bar, showQuickPick: async () => undefined }, workspace: { getConfiguration: () => ({ get: (key, fallback) => values[key] ?? fallback }), onDidChangeConfiguration: listener => { change = listener; return { dispose() {} }; } }, commands: { registerCommand: (name, callback) => { commands.set(name, callback); return { dispose() {} }; } } };
-  install(vscode, context, root, clock);
-  return { bar, commands, vscode, values, interval: () => interval(), change: key => change({ affectsConfiguration: name => name === key }), clears: () => clears, dispose: () => context.subscriptions.forEach(item => item.dispose?.()) };
+  const controller = install(vscode, context, root, clock);
+  return { controller, bar, commands, vscode, values, interval: () => interval(), change: key => change({ affectsConfiguration: name => name === key }), clears: () => clears, dispose: () => context.subscriptions.forEach(item => item.dispose?.()) };
 }
 test('status bar refreshes saved local data, labels expiry and respects timer settings', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gptide-usage-ui-')), oldRead = usage.read; let reads = 0, value;
@@ -15,9 +15,9 @@ test('status bar refreshes saved local data, labels expiry and respects timer se
   const now = { value: Date.now() }; value = usage.normalize({ primary: { usedPercent: 20, resetsAt: (now.value + 60000) / 1000 } }, new Date(now.value).toISOString(), 'fixture');
   const ui = setup(root, now);
   try {
-    await tick(); assert.ok(ui.bar.text.includes('80%')); value = { ...value, primary: { ...value.primary, usedPercent: 40, remainingPercent: 60 } };
+    await tick(); assert.ok(ui.bar.text.includes('80%')); assert.equal(ui.controller.snapshot().windows[0].remainingPercent,80); assert.equal(ui.controller.snapshot().windows[0].state,'cached'); value = { ...value, primary: { ...value.primary, usedPercent: 40, remainingPercent: 60 } };
     await usage.save(root, { primary: { usedPercent: 40 } }); await tick(); assert.ok(ui.bar.text.includes('60%'));
-    now.value += 61000; ui.interval(); await tick(); assert.equal(ui.bar.text, '$(history) 用量'); assert.ok(ui.bar.tooltip.includes('当前剩余未知'));
+    now.value += 61000; ui.interval(); await tick(); assert.equal(ui.bar.text, '$(history) 用量'); assert.equal(ui.controller.snapshot().windows[0].state,'expired'); assert.ok(ui.bar.tooltip.includes('当前剩余未知'));
     let options; ui.vscode.window.showQuickPick = async items => { options = items; }; await ui.commands.get('gptide.usage')(); assert.ok(options[0].description.includes('窗口已过期'));
     ui.values['usage.autoRefreshSeconds'] = 0; ui.change('gptide.usage.autoRefreshSeconds'); assert.equal(ui.clears(), 1);
     ui.dispose(); const before = reads; await usage.save(root, { primary: { usedPercent: 50 } }); await tick(); assert.equal(reads, before);

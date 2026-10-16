@@ -47,7 +47,7 @@ class Chat {
     this.context = context; this.serviceTier = "default"; this.messages = []; this.chats = []; this.model = vscode.workspace.getConfiguration('gptide').get('model');
     this.preferences = preferences.values(vscode.workspace.getConfiguration('gptide'));
     this.status = '正在读取项目进度'; this.busy = false; this.attachments = []; this.effort = this.preferences.defaultEffort; this.mode = this.preferences.defaultMode; this.hiddenCursorIds = []; this.project = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    this.output = vscode.window.createOutputChannel('GptIDE'); context.subscriptions.push(this.output);
+    this.output = vscode.window.createOutputChannel('GPTIDE'); context.subscriptions.push(this.output);
     const root = path.resolve(context.extensionPath, '../../../../..');
     this.root = root; this.data = path.join(root, 'data', 'projects'); fs.mkdirSync(this.data, { recursive: true });
     this.projectKey = this.project ? projectScope.key(this.project) : null;
@@ -318,7 +318,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), focusRequestId: this.focusRequestId, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, canCancelLogin: !!this.loginSession?.id && !this.loginSession.done && !this.loginSession.completing && !this.loginSession.canceling, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], modelChoices:require("./model-catalog.cjs").choices(this.models||[]), serviceTier:this.serviceTier||"default", ...this.approvalSettings(), model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, ...(c.statsVersion===1?{added:c.added,removed:c.removed,approximate:!!c.approximate}:require('./diff-stats.cjs').stats(c.before,c.after)) })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', usage: this.usageSnapshot?.(), revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), focusRequestId: this.focusRequestId, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, canCancelLogin: !!this.loginSession?.id && !this.loginSession.done && !this.loginSession.completing && !this.loginSession.canceling, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], modelChoices:require("./model-catalog.cjs").choices(this.models||[]), serviceTier:this.serviceTier||"default", ...this.approvalSettings(), model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, ...(c.statsVersion===1?{added:c.added,removed:c.removed,approximate:!!c.approximate}:require('./diff-stats.cjs').stats(c.before,c.after)) })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -476,7 +476,7 @@ class Chat {
     const cancellation = new vscode.CancellationTokenSource(); this.inlineCancellation = cancellation;
     try {
       const fixed = this.fixedContext?.read(); if (fixed) { snapshot.projectContext = fixed.text; if (fixed.warnings.length) this.contextWarning = fixed.warnings.join('；'); }
-      const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GptIDE 正在改写选区', cancellable: true }, async (_, token) => {
+      const replacement = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'GPTIDE 正在改写选区', cancellable: true }, async (_, token) => {
         const relay = token.onCancellationRequested(() => cancellation.cancel());
         if (token.isCancellationRequested || this.invalidated) cancellation.cancel();
         try { return await inlineAgent.generate({ executable: findCodex(vscode.workspace.getConfiguration('gptide').get('codexPath')), cwd: this.project, model: this.model, effort: this.effort, snapshot, instruction, token: cancellation.token }); }
@@ -505,7 +505,7 @@ class Chat {
   }
   async deleteChat(id=this.activeId) {
     const chat = this.chats.find(c => c.id === id && c.projectKey === this.projectKey); if (!chat || this.actionLocked() || this.storageBlocked || this.invalidated) return;
-    const answer = await vscode.window.showWarningMessage(chat.source === 'cursor' ? '从 GptIDE 隐藏此对话？Cursor 原记录会保留。' : '删除本地对话记录？', { modal: true }, '确认');
+    const answer = await vscode.window.showWarningMessage(chat.source === 'cursor' ? '从 GPTIDE 隐藏此对话？Cursor 原记录会保留。' : '删除本地对话记录？', { modal: true }, '确认');
     if (answer !== '确认' || this.actionLocked() || this.storageBlocked || this.invalidated || !this.chats.includes(chat)) return;
     if (chat.source === 'cursor') this.hiddenCursorIds.push(chat.id);
     this.chats = this.chats.filter(c => c.id !== chat.id); this.openChatIds = this.openChatIds.filter(id => id !== chat.id);
@@ -699,7 +699,7 @@ class Chat {
   async approve(request, bridge = this.bridge) {
     if (!bridge || !request || !['string', 'number'].includes(typeof request.id)) return;
     const input = request.method === 'item/tool/requestUserInput', approval = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(request.method);
-    if (!input && !approval) { bridge.send({ id: request.id, error: { code: -32601, message: 'GptIDE 尚不支持此请求' } }); return; }
+    if (!input && !approval) { bridge.send({ id: request.id, error: { code: -32601, message: 'GPTIDE 尚不支持此请求' } }); return; }
     const params = request.params, activeId = this.activeId, key = typeof request.id + ':' + String(request.id);
     const current = () => !this.invalidated && !record?.resolved && this.bridge === bridge && this.busy && this.activeId === activeId && typeof params?.threadId === 'string' && params.threadId === this.threadId && typeof params.turnId === 'string' && !!params.turnId && (!this.turnId || params.turnId === this.turnId) && !this.retiredTurnIds?.has(params.turnId);
     let record;
@@ -849,7 +849,7 @@ class Chat {
   dispose() { this.invalidateProject(); }
 }
 function activate(context) {
-  require('./usage-ui.cjs').install(vscode, context, path.resolve(context.extensionPath, '../../../../..'));
+  const usageUI = require('./usage-ui.cjs').install(vscode, context, path.resolve(context.extensionPath, '../../../../..'));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.importVSCode', () => require('./vscode-import-ui.cjs').run(vscode, path.resolve(context.extensionPath, '../../../../..'), context.globalStorageUri).catch(e => vscode.window.showErrorMessage(e.message))));
   let chat;
   require('./commit-message.cjs').install(vscode,context,()=>chat);
@@ -873,7 +873,7 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => { chat?.invalidateProject(); vscode.commands.executeCommand('workbench.action.reloadWindow'); }));
   if (vscode.workspace.workspaceFolders?.length !== 1) return;
   require('./open-changes.cjs').install(vscode,context);
-  chat = new Chat(context); chat.settingsRefresh = settings.refresh; context.subscriptions.push(chat);
+  chat = new Chat(context); chat.usageSnapshot = usageUI.snapshot; context.subscriptions.push(usageUI.onChange(() => chat.post())); chat.settingsRefresh = settings.refresh; context.subscriptions.push(chat);
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration("gptide")) chat.post(); }));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('gptide.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => chat.focusInput().catch(error => vscode.window.showErrorMessage(error.message))));

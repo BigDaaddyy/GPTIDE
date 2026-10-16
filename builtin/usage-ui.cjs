@@ -1,5 +1,8 @@
+const { EventEmitter } = require('node:events');
 const path = require('node:path'), usage = require('./usage.cjs');
 function install(vscode, context, root, clock = { now: Date.now, setInterval, clearInterval }) {
+  const events = new EventEmitter();
+  const snapshot = () => ({ timestamp: cached?.timestamp, source: cached?.source, windows: [cached?.primary, cached?.secondary].filter(Boolean).map(w => ({ ...w, label: usage.label(w), state: usage.status(cached, w, clock.now(), staleMinutes()) })) });
   const bar = vscode.window.createStatusBarItem('gptide.usage', vscode.StatusBarAlignment.Right, 48);
   bar.name = 'ChatGPT 用量'; bar.command = 'gptide.usage'; bar.text = '$(dashboard) 用量';
   let cached, pending, dirty = false, disposed = false, timer;
@@ -7,6 +10,7 @@ function install(vscode, context, root, clock = { now: Date.now, setInterval, cl
   const staleMinutes = () => { const value = config().get('usage.staleAfterMinutes', 15); return typeof value === 'number' && Number.isFinite(value) ? Math.min(240, Math.max(1, value)) : 15; };
   const render = () => {
     if (disposed) return;
+    events.emit('change');
     const w = cached?.primary, state = usage.status(cached, w, clock.now(), staleMinutes());
     bar.text = state === 'cached' ? `$(dashboard) ${w.remainingPercent}%` : state === 'unknown' ? '$(dashboard) 用量' : '$(history) 用量';
     const summary = state === 'expired' ? '该窗口已过期，当前剩余未知' : state === 'stale' ? '缓存需更新，当前剩余未知' : w ? `记录中剩余 ${w.remainingPercent}%` : '当前窗口未知';
@@ -40,7 +44,7 @@ function install(vscode, context, root, clock = { now: Date.now, setInterval, cl
   };
   context.subscriptions.push(bar, vscode.commands.registerCommand('gptide.usage', show));
   context.subscriptions.push(usage.onChange(changedRoot => { if (path.resolve(root) === changedRoot) refresh().catch(() => {}); }));
-  context.subscriptions.push({ dispose: () => { disposed = true; if (timer !== undefined) clock.clearInterval(timer); } });
+  context.subscriptions.push({ dispose: () => { disposed = true; events.removeAllListeners(); if (timer !== undefined) clock.clearInterval(timer); } });
   if (config().get('usage.showStatusBar', true)) bar.show();
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration('gptide.usage.showStatusBar')) config().get('usage.showStatusBar', true) ? bar.show() : bar.hide();
@@ -48,5 +52,6 @@ function install(vscode, context, root, clock = { now: Date.now, setInterval, cl
     if (e.affectsConfiguration('gptide.usage.staleAfterMinutes')) render();
   }));
   schedule(); refresh().catch(() => {});
+  return { snapshot, onChange(listener) { events.on('change', listener); return { dispose: () => events.off('change', listener) }; } };
 }
 module.exports = { install };

@@ -28,7 +28,7 @@ function install(vscode, context, root, currentChat) {
   };
   context.subscriptions.push(vscode.commands.registerCommand('gptide.settings', async () => {
     if (panel) { panel.reveal(); publish(); return; }
-    panel = vscode.window.createWebviewPanel('gptide.settings', 'GptIDE 配置', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
+    panel = vscode.window.createWebviewPanel('gptide.settings', 'GPTIDE 配置', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
     const own = panel, nonce = require('node:crypto').randomBytes(18).toString('hex');
     panel.webview.html = fs.readFileSync(path.join(__dirname, 'settings-panel.html'), 'utf8').replace('__SCRIPT__', () => fs.readFileSync(path.join(__dirname, 'settings-panel.js'), 'utf8')).replaceAll('__NONCE__', nonce);
     const changed = vscode.workspace.onDidChangeConfiguration(event => { if (!writing && event.affectsConfiguration('gptide')) publish(); });
@@ -65,7 +65,7 @@ function install(vscode, context, root, currentChat) {
         if (message.type === 'diagnostics') return vscode.commands.executeCommand('gptide.diagnostics');
         if (message.type !== 'config') return;
       const file = path.join(codexHome(), 'config.toml');
-      if (!fs.existsSync(file)) return vscode.window.showInformationMessage('本机尚无 Codex config.toml，GptIDE 会话配置可直接使用。');
+      if (!fs.existsSync(file)) return vscode.window.showInformationMessage('本机尚无 Codex config.toml，GPTIDE 会话配置可直接使用。');
       return vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
       } catch (error) { if (panel === own) own.webview.postMessage({ type: 'error', message: error.message }); }
     });

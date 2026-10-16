@@ -49,14 +49,14 @@ async function fromSession(file) {
 }
 async function read(root, base = home()) {
   let cached = null;
-  try { const value = JSON.parse(await fs.readFile(path.join(root, 'data', 'usage.json'), 'utf8')); cached = normalize(value, value.timestamp, 'GptIDE 缓存'); } catch {}
+  try { const value = JSON.parse(await fs.readFile(path.join(root, 'data', 'usage.json'), 'utf8')); cached = normalize(value, value.timestamp, 'GPTIDE 缓存'); } catch {}
   const results = await Promise.all((await sessionFiles(base)).map(fromSession));
   const latest = [...results.filter(Boolean), ...(cached ? [cached] : [])].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
   return latest || null;
 }
 async function save(root, raw) {
   const value = raw?.rateLimitsByLimitId?.codex || raw?.rateLimits || raw;
-  const result = normalize(value, new Date().toISOString(), 'GptIDE 缓存'); if (!result) return;
+  const result = normalize(value, new Date().toISOString(), 'GPTIDE 缓存'); if (!result) return;
   const key = path.resolve(root), task = (writes.get(key) || Promise.resolve()).catch(() => {}).then(() => writeCache(key, result));
   writes.set(key, task); task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {}); return task;
 }
