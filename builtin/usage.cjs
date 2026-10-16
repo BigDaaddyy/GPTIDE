@@ -49,7 +49,7 @@ async function fromSession(file) {
 }
 async function read(root, base = home()) {
   let cached = null;
-  try { const value = JSON.parse(await fs.readFile(path.join(root, 'data', 'usage.json'), 'utf8')); cached = normalize(value, value.timestamp, 'GPTIDE 缓存'); } catch {}
+  try { const value = JSON.parse(await fs.readFile(path.join(require('./data-paths.cjs').dataRoot(root), 'usage.json'), 'utf8')); cached = normalize(value, value.timestamp, 'GPTIDE 缓存'); } catch {}
   const results = await Promise.all((await sessionFiles(base)).map(fromSession));
   const latest = [...results.filter(Boolean), ...(cached ? [cached] : [])].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
   return latest || null;
@@ -61,7 +61,7 @@ async function save(root, raw) {
   writes.set(key, task); task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {}); return task;
 }
 async function writeCache(root, result) {
-  await fs.mkdir(path.join(root, 'data'), { recursive: true });
+  await fs.mkdir(require('./data-paths.cjs').dataRoot(root), { recursive: true });
   const target = path.join(root, 'data', 'usage.json'), temp = target + '.' + require('node:crypto').randomUUID() + '.tmp';
   try { await fs.writeFile(temp, JSON.stringify(result)); await fs.rename(temp, target); changes.emit('change', path.resolve(root)); } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
 }

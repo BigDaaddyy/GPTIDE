@@ -5,7 +5,7 @@ test('launcher opens the GUI even when invoked from an Electron Node environment
   const fakeProcess = { env: environment, argv: ['node', 'launch.cjs', 'C:/project with spaces'] };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../tools/launch.cjs'),'utf8'), {
     __dirname: path.join(__dirname,'../tools'), process: fakeProcess, console,
-    require: name => name === 'node:child_process' ? { spawn: (...args) => { invoked = args; return { on() {}, unref() { unreferenced = true; } }; } } : require(name)
+    require: name => name === 'node:child_process' ? { spawn: (...args) => { invoked = args; return { on() {}, unref() { unreferenced = true; } }; } } : name.includes('data-paths.cjs') ? {locations:()=>({data:'C:/fixture/GPTIDE',extensions:'C:/fixture/extensions'}),migrate() {},ensureDefaults() {}} : name==='node:fs'?{mkdirSync(){},existsSync:()=>true}:name.includes('defaults.cjs')?{settings:{},keybindings:[]}:require(name)
   });
   assert.equal(path.basename(invoked[0]), 'GPTIDE.exe');
   assert.equal(invoked[2].env.ELECTRON_RUN_AS_NODE, undefined);

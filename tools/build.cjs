@@ -38,42 +38,4 @@ Object.assign(product, { nameShort: 'GPTIDE', nameLong: 'GPTIDE', win32DirName: 
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.css'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchCss)).digest('base64').replace(/=+$/, '');
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.js'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchJs)).digest('base64').replace(/=+$/, '');
 fs.writeFileSync(productFile, JSON.stringify(product, null, 2));
-const manifestCache = path.join(root, 'data', 'user', 'CachedProfilesData', '__default__profile__', 'extensions.builtin.cache');
-if (fs.existsSync(manifestCache)) fs.unlinkSync(manifestCache);
-const user = path.join(root, 'data', 'user', 'User'); fs.mkdirSync(user, { recursive: true });
-const settingsFile = path.join(user, 'settings.json');
-// Migrate only the old generated title, preserving custom window titles.
-if(fs.existsSync(settingsFile)){const text=fs.readFileSync(settingsFile,'utf8');const next=text.replace(/("window.title"\s*:\s*"\$\{rootName\}\$\{separator\})GptIDE(")/g,'$1GPTIDE$2');if(next!==text)fs.writeFileSync(settingsFile,next);}
-// User-level defaults win over VS Code's numerous Ctrl+K chord prefixes.
-// Existing user customizations remain owned by the user.
-const keysFile = path.join(user, 'keybindings.json');
-if (!fs.existsSync(keysFile)) fs.writeFileSync(keysFile, JSON.stringify([
-  { key: 'ctrl+k', command: 'gptide.inlineEdit', when: 'editorTextFocus && workspaceFolderCount == 1' },
-  { key: 'ctrl+shift+k', command: 'gptide.attachSelection', when: 'editorTextFocus && workspaceFolderCount == 1' }
-], null, 2));
-else {
-  // Migrate only our original defaults; preserve customized conditions/JSONC.
-  try {
-    const keys = JSON.parse(fs.readFileSync(keysFile, 'utf8')); let changed = false;
-    for (const binding of keys) if (['gptide.inlineEdit', 'gptide.attachSelection'].includes(binding.command) && ['editorTextFocus', 'editorTextFocus && workspaceFolderCount > 0'].includes(binding.when)) { binding.when = 'editorTextFocus && workspaceFolderCount == 1'; changed = true; }
-    if (changed) fs.writeFileSync(keysFile, JSON.stringify(keys, null, 2));
-  } catch {}
-}
-if (!fs.existsSync(settingsFile)) fs.writeFileSync(settingsFile, JSON.stringify({
-  'workbench.colorTheme': 'Default Light Modern',
-  'workbench.startupEditor': 'none',
-  'workbench.sideBar.location': 'left',
-  'workbench.activityBar.location': 'top',
-  'workbench.editor.empty.hint': 'hidden',
-  'window.title': '${rootName}${separator}GPTIDE',
-  'window.commandCenter': true,
-  'window.restoreWindows': 'one',
-  'editor.fontSize': 14,
-  'editor.minimap.enabled': false,
-  'telemetry.telemetryLevel': 'off',
-  'update.mode': 'none',
-  'extensions.autoUpdate': false,
-  'gptide.model': 'gpt-6.1-sol',
-  'workbench.colorCustomizations': { 'focusBorder': '#5E6AD2', 'button.background': '#5E6AD2', 'button.hoverBackground': '#4D59BE', 'activityBarBadge.background': '#5E6AD2', 'sideBar.background': '#F8F9FB' }
-}, null, 2));
-console.log('GPTIDE 内置聊天已打包；完整编辑器、Node 运行时和项目独立数据目录已准备。');
+console.log('GPTIDE 内置聊天与完整运行包已准备；个人数据由启动器放在用户目录。');

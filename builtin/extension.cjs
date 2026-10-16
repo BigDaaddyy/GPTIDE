@@ -49,7 +49,7 @@ class Chat {
     this.status = '正在读取项目进度'; this.busy = false; this.attachments = []; this.effort = this.preferences.defaultEffort; this.mode = this.preferences.defaultMode; this.hiddenCursorIds = []; this.project = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     this.output = vscode.window.createOutputChannel('GPTIDE'); context.subscriptions.push(this.output);
     const root = path.resolve(context.extensionPath, '../../../../..');
-    this.root = root; this.data = path.join(root, 'data', 'projects'); fs.mkdirSync(this.data, { recursive: true });
+    this.root = root; this.data = path.join(require('./data-paths.cjs').dataRoot(root), 'projects'); fs.mkdirSync(this.data, { recursive: true });
     this.projectKey = this.project ? projectScope.key(this.project) : null;
     this.stateFile = this.projectKey ? path.join(this.data, this.projectKey + '.json') : null;
     try { this.drafts = new (require('./drafts.cjs').Drafts)(path.join(this.data, this.projectKey + '.drafts.json'), this.projectKey); if (this.drafts.recovered) this.draftWarning = '草稿已从备份恢复'; }
@@ -849,6 +849,8 @@ class Chat {
   dispose() { this.invalidateProject(); }
 }
 function activate(context) {
+  require('./data-paths.cjs').initialize(context,path.resolve(context.extensionPath,'../../../../..'));
+  require('./onboarding.cjs').run(vscode,context,path.resolve(context.extensionPath,'../../../../..')).catch(error=>vscode.window.showErrorMessage('首次导入未完成：'+error.message));
   const usageUI = require('./usage-ui.cjs').install(vscode, context, path.resolve(context.extensionPath, '../../../../..'));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.importVSCode', () => require('./vscode-import-ui.cjs').run(vscode, path.resolve(context.extensionPath, '../../../../..'), context.globalStorageUri).catch(e => vscode.window.showErrorMessage(e.message))));
   let chat;

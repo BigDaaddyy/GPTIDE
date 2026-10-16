@@ -1,6 +1,6 @@
 {
   "name": "gptide-desktop",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "build": "node tools/build.cjs",
@@ -8,6 +8,7 @@
     "test": "node --test test/*.test.cjs",
     "check": "node tools/check.cjs",
     "acceptance": "node tools/acceptance.cjs",
-    "verify:runtime": "node tools/verify-runtime.cjs"
+    "verify:runtime": "node tools/verify-runtime.cjs",
+    "package": "node tools/package.cjs"
   }
 }
