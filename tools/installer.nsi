@@ -3,6 +3,11 @@
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 Name "GPTIDE"
+VIProductVersion "${VERSION}.0"
+VIAddVersionKey /LANG=2052 "ProductName" "GPTIDE"
+VIAddVersionKey /LANG=2052 "FileDescription" "GPTIDE 安装程序"
+VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"
+VIAddVersionKey /LANG=2052 "LegalCopyright" "GPTIDE contributors"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\GPTIDE"
 RequestExecutionLevel user
@@ -23,6 +28,7 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "SimpChinese"
 Var TestMode
 Var Parameters
+Var ProfileDirectory
 !macro RequireClosed label
   IfFileExists "$INSTDIR\app\GPTIDE.exe" 0 ${label}
   ClearErrors
@@ -60,11 +66,23 @@ Section "GPTIDE"
   WriteINIStr "$INSTDIR\installation.ini" "GPTIDE" "Version" "${VERSION}"
   WriteINIStr "$INSTDIR\installation.ini" "GPTIDE" "TestMode" "$TestMode"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  StrCpy $ProfileDirectory "$APPDATA\GPTIDE"
+  ${If} $TestMode == "1"
+    ${GetParent} "$INSTDIR" $0
+    StrCpy $ProfileDirectory "$0\Roaming\GPTIDE"
+  ${EndIf}
+  SetOutPath "$ProfileDirectory\User"
+  IfFileExists "$ProfileDirectory\User\settings.json" settings_done
+    File /oname=settings.json "${DEFAULTS}\settings.json"
+  settings_done:
+  IfFileExists "$ProfileDirectory\User\keybindings.json" keys_done
+    File /oname=keybindings.json "${DEFAULTS}\keybindings.json"
+  keys_done:
   SetOutPath "$INSTDIR"
   ${If} $TestMode != "1"
     CreateDirectory "$SMPROGRAMS\GPTIDE"
-    CreateShortcut "$SMPROGRAMS\GPTIDE\GPTIDE.lnk" "$INSTDIR\app\GPTIDE.exe" '--user-data-dir "$APPDATA\GPTIDE" --shared-data-dir "$APPDATA\GPTIDE\shared" --extensions-dir "$PROFILE\.gptide\extensions" --new-window' "$INSTDIR\assets\icon.ico"
-    CreateShortcut "$DESKTOP\GPTIDE.lnk" "$INSTDIR\app\GPTIDE.exe" '--user-data-dir "$APPDATA\GPTIDE" --shared-data-dir "$APPDATA\GPTIDE\shared" --extensions-dir "$PROFILE\.gptide\extensions" --new-window' "$INSTDIR\assets\icon.ico"
+    CreateShortcut "$SMPROGRAMS\GPTIDE\GPTIDE.lnk" "$INSTDIR\app\GPTIDE.exe" '--user-data-dir "$APPDATA\GPTIDE" --shared-data-dir "$APPDATA\GPTIDE\shared" --extensions-dir "$PROFILE\.gptide\extensions" --new-window --skip-welcome' "$INSTDIR\assets\icon.ico"
+    CreateShortcut "$DESKTOP\GPTIDE.lnk" "$INSTDIR\app\GPTIDE.exe" '--user-data-dir "$APPDATA\GPTIDE" --shared-data-dir "$APPDATA\GPTIDE\shared" --extensions-dir "$PROFILE\.gptide\extensions" --new-window --skip-welcome' "$INSTDIR\assets\icon.ico"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPTIDE" "DisplayName" "GPTIDE"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPTIDE" "DisplayVersion" "${VERSION}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPTIDE" "InstallLocation" "$INSTDIR"
