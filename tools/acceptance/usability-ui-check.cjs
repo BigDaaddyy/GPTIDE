@@ -10,12 +10,18 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     const page = await browser.newPage({ viewport: { width: 390, height: 780 } }); await page.goto(pathToFileURL(file).href);
     const state = { type: 'state', revision: 1, projectKey: 'qa', project: 'C:/qa/很长的项目名称', activeId: 'a', openChatIds: ['a','b'], chats: [{ id: 'a', name: '当前项目对话', source: 'gptide' }, { id: 'b', name: '另外一个对话', source: 'gptide' }], history: [{ id: 'a', name: '当前项目对话', source: 'gptide' }], source: 'gptide', preferences: { autoConnect: false }, models: [], messages: [{ role: 'user', text: 'long/path/'.repeat(30) }, { role: 'assistant', text: '```js\n' + 'const name = "long";'.repeat(50) + '\n```' }], tasks: [], changes: [], attachments: [], draft: '', busy: false, status: '未连接 · 发送时连接' };
     const publish = async extra => page.evaluate(s => window.dispatchEvent(new MessageEvent('message', { data: s })), { ...state, ...extra }); await publish();
-    await publish({usage:{timestamp:new Date().toISOString(),windows:[{label:'5 小时',remainingPercent:72,state:'cached'},{label:'每周',remainingPercent:34,state:'cached'}]}});
-    assert.match(await page.locator('#usage-summary').innerText(),/72% 剩余/);assert.match(await page.locator('#usage-summary').innerText(),/34% 剩余/);
-    await page.locator('#usage-summary').click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'usage');
+    assert.equal(await page.locator('#usage-summary').count(),0,'Quota belongs in the editor status bar');
+    await publish({messages:[{role:'user',text:'时间与消息操作',createdAt:'2026-10-16T10:20:30Z'},{role:'assistant',text:'回复',createdAt:1792146030000}]});
+    await page.locator('#input').hover();
+    for (const role of ['user','assistant']) {
+      const row=page.locator('.message.'+role);assert.equal(await row.locator('.copy-message').evaluate(e=>getComputedStyle(e).opacity),'1');assert.equal(await row.locator('.branch-message').evaluate(e=>getComputedStyle(e).opacity),'1');
+      assert.equal(await row.locator('.message-time').evaluate(e=>getComputedStyle(e).opacity),'0');await row.hover();await page.waitForTimeout(180);
+      assert.equal(await row.locator('.message-time').evaluate(e=>getComputedStyle(e).opacity),'1');assert.match(await row.locator('.message-time').textContent(),/2026.*\d{2}:\d{2}:\d{2}/);
+      const geometry=await row.evaluate(e=>{const a=e.querySelector('.copy-message').getBoundingClientRect(),b=e.querySelector('.message-time').getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2);});assert.ok(geometry<2,'Timestamp and controls must share one row');await page.locator('#input').hover();await page.waitForTimeout(180);
+    }
+    await page.screenshot({path:path.join(env.artifacts,'message-actions-always-visible.png')});await publish();
     await page.setViewportSize({width:260,height:500});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth),0);
     await page.screenshot({path:path.join(env.artifacts,'usage-260.png')});await page.setViewportSize({width:390,height:780});
-    await publish({usage:{windows:[{label:'5 小时',remainingPercent:99,state:'expired'}]}});assert.match(await page.locator('#usage-summary').innerText(),/待更新/);assert.doesNotMatch(await page.locator('#usage-summary').innerText(),/99%/);await publish();
     const snippet=Array.from({length:40},(_,i)=>'const 名字'+i+' = "<script>&"; // comment').join('\n');
     await publish({messages:[{role:'assistant',text:'```js\n'+snippet+'\n```'}]});
     assert.equal(await page.locator('.code-block code').textContent(),snippet);assert.equal(await page.locator('.code-block script').count(),0);assert.ok(await page.locator('.code-keyword').count());assert.ok(await page.locator('pre.code-folded').count());
@@ -71,6 +77,13 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     await publish({history:histories});await page.locator('#history').click();assert.ok((await page.locator('.history-open').first().innerText()).includes('Pinned'));assert.equal(await page.locator('.history-row').count(),2);await page.locator('.history-row').first().getByRole('button',{name:'More options',exact:true}).click();await page.getByRole('button',{name:'Rename',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).id),'pinned');assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'rename');await page.locator('#history-archived').click();assert.equal(await page.locator('.history-row').count(),1);await page.getByRole('button',{name:'恢复对话',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'archiveChat');assert.equal(await page.evaluate(()=>qaMessages.at(-1).value),false);await page.screenshot({path:path.join(env.artifacts,'history-archived-300.png')});
     await publish({openChatIds:['a'],chats:[{id:'a',name:'短标题'}]});
     const singleTab=await page.locator('.chat-tab').boundingBox();assert.ok(singleTab.width<190,'Single tab must not stretch across the toolbar');
+    assert.equal(await page.locator('.chat-tab [title]').count(),0,'Basic tab controls should not display tooltips');
+    const tabStyle=await page.locator('.chat-tab').evaluate(tab=>({gap:getComputedStyle(tab.parentElement).gap,nameHover:getComputedStyle(tab.querySelector('.chat-tab-name')).backgroundColor,close:tab.querySelector('.chat-tab-close').getBoundingClientRect().left,name:tab.querySelector('.chat-tab-name').getBoundingClientRect().right}));assert.equal(tabStyle.gap,'0px');assert.ok(Math.abs(tabStyle.close-tabStyle.name)<1,'Close must sit directly beside title');
+    await page.screenshot({path:path.join(env.artifacts,'tabs-single.png')});
+    await page.locator('.chat-tab-close').hover();await page.waitForTimeout(180);
+    const centered=await page.locator('.chat-tab-close').evaluate(button=>{const b=button.getBoundingClientRect(),s=button.querySelector('svg').getBoundingClientRect();return {x:Math.abs(b.x+b.width/2-s.x-s.width/2),y:Math.abs(b.y+b.height/2-s.y-s.height/2)};});assert.ok(centered.x<.5&&centered.y<.5,'Close icon must be centered in its hover background');
+    await page.screenshot({path:path.join(env.artifacts,'tab-close-hover-centered.png')});
+    await publish({chats:[{id:'a',name:'检查编辑器对话标签与鼠标关闭的交互是否正确'},{id:'b',name:'后台对话'}]});await page.locator('.chat-tab').last().hover();await page.screenshot({path:path.join(env.artifacts,'tabs-hover.png')});
     await publish();await page.locator('#input').fill('中键关闭保留草稿');
     await page.locator('.chat-tab').nth(1).click({button:'middle'});
     assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'closeTab');assert.equal(await page.evaluate(()=>qaMessages.at(-1).id),'b');

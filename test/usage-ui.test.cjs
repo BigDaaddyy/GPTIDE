@@ -17,7 +17,7 @@ test('status bar refreshes saved local data, labels expiry and respects timer se
   try {
     await tick(); assert.ok(ui.bar.text.includes('80%')); assert.equal(ui.controller.snapshot().windows[0].remainingPercent,80); assert.equal(ui.controller.snapshot().windows[0].state,'cached'); value = { ...value, primary: { ...value.primary, usedPercent: 40, remainingPercent: 60 } };
     await usage.save(root, { primary: { usedPercent: 40 } }); await tick(); assert.ok(ui.bar.text.includes('60%'));
-    now.value += 61000; ui.interval(); await tick(); assert.equal(ui.bar.text, '$(history) 用量'); assert.equal(ui.controller.snapshot().windows[0].state,'expired'); assert.ok(ui.bar.tooltip.includes('当前剩余未知'));
+    now.value += 61000; ui.interval(); await tick(); assert.match(ui.bar.text, /GPT .*待更新/); assert.equal(ui.controller.snapshot().windows[0].state,'expired'); assert.ok(ui.bar.tooltip.includes('当前剩余未知'));
     let options; ui.vscode.window.showQuickPick = async items => { options = items; }; await ui.commands.get('gptide.usage')(); assert.ok(options[0].description.includes('窗口已过期'));
     ui.values['usage.autoRefreshSeconds'] = 0; ui.change('gptide.usage.autoRefreshSeconds'); assert.equal(ui.clears(), 1);
     ui.dispose(); const before = reads; await usage.save(root, { primary: { usedPercent: 50 } }); await tick(); assert.equal(reads, before);
@@ -42,4 +42,11 @@ test('weekly-only records remain visible in the status bar and shared quota snap
     assert.equal(ui.controller.snapshot().windows.length, 1);
     assert.equal(ui.controller.snapshot().windows[0].label, '每周');
   } finally { ui.dispose(); usage.read = oldRead; }
+});
+
+test('bottom status bar shows both quota windows and opens usage details',async()=>{
+  const oldRead=usage.read,now={value:Date.now()};usage.read=async()=>usage.normalize({primary:{usedPercent:28,windowDurationMins:300},secondary:{usedPercent:66,windowDurationMins:10080}},new Date(now.value).toISOString(),'fixture');
+  const ui=setup(path.join(os.tmpdir(),'gptide-both-windows'),now);
+  try {await tick();assert.equal(ui.bar.text,'$(dashboard) GPT 5h 72% · 周 34%');assert.equal(ui.bar.command,'gptide.usage');let items;ui.vscode.window.showQuickPick=async value=>{items=value;};await ui.commands.get(ui.bar.command)();assert.match(items[0].label,/72%/);assert.match(items[1].label,/34%/);}
+  finally{ui.dispose();usage.read=oldRead;}
 });

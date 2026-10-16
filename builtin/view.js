@@ -106,6 +106,12 @@ function renderQueue(s) {
     el('queue-list').append(row);
   }
 }
+function updateMessageTime(element, value) {
+  const date = new Date(typeof value === 'number' && value > 0 && value < 1e11 ? value * 1000 : typeof value === 'number' || typeof value === 'string' ? value : NaN);
+  const valid = value !== undefined && value !== null && value !== 0 && Number.isFinite(date.getTime());
+  element.textContent = valid ? new Intl.DateTimeFormat('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23' }).format(date) : '时间未知';
+  if (valid) element.dateTime = date.toISOString(); else element.removeAttribute('datetime');
+}
 function renderMessages(s) {
   const chatKey = s.activeId || '__new__', switched = renderedChat !== chatKey;
   if (switched) { renderedChat = chatKey; visibleMessages = 100; messageAnchor = null; }
@@ -132,7 +138,7 @@ function renderMessages(s) {
     if (row) { row.item.dataset.messageIndex = String(index); row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
-      content(row.body, message.text); row.signature = signature; row.message = message; continue;
+      content(row.body, message.text); updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
     }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GPTIDE');
     item.dataset.messageIndex = String(index);
@@ -140,9 +146,10 @@ function renderMessages(s) {
     const copy = make('button', 'copy-message', '复制'); copy.onclick = () => post('copy', { text: messageRows.get(key).message.text }); role.append(copy);
     const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked;
     branch.onclick = () => { flushDraft(); beginTabChange(); post('branch', { id: state.activeId, index: Number(item.dataset.messageIndex), revision: state.revision }); }; role.append(branch);
+    const time = make('time', 'message-time'); updateMessageTime(time, message.createdAt); role.append(time);
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    row = { item, body, signature, message, branch }; messageRows.set(key, row);
+    row = { item, body, signature, message, branch, time }; messageRows.set(key, row);
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.
@@ -221,9 +228,12 @@ function render(s) {
     for (const id of s.openChatIds || []) {
       const chat = s.chats.find(c => c.id === id); if (!chat) continue;
       const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
-      const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
+      const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id));
       button.disabled = s.operationLocked || s.busy || s.reviewBusy; button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
-      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭对话（也可点击鼠标中键）'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.operationLocked || s.busy || s.reviewBusy; close.tabIndex = -1;
+      const close = make('button', 'chat-tab-close'); close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.operationLocked || s.busy || s.reviewBusy; close.tabIndex = -1;
+      const closeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      closeIcon.setAttribute('viewBox', '0 0 16 16'); closeIcon.setAttribute('aria-hidden', 'true'); closeIcon.setAttribute('focusable', 'false');
+      const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path'); closePath.setAttribute('d', 'M3 3l10 10M13 3L3 13'); closeIcon.append(closePath); close.append(closeIcon);
       const closeTab = () => { if (close.disabled) return; flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); };
       close.onclick = closeTab;
       tab.onmousedown = e => { if (e.button === 1) e.preventDefault(); };
@@ -246,14 +256,6 @@ function render(s) {
   }
   if (pendingFocusChat) { const target = [...el('chat-tabs').querySelectorAll('[role="tab"]')].find(b => b.dataset.chatId === pendingFocusChat); target?.focus(); pendingFocusChat = undefined; }
   renderMessages(s); renderTasks(s); state = s;
-  const usageWindows = s.usage?.windows || [], summary = el('usage-windows'); summary.replaceChildren();
-  for (const w of usageWindows) {
-    const fresh = w.state === 'cached', item = make('span', 'usage-window');
-    item.append(make('span', '', w.label), make('strong', '', fresh ? w.remainingPercent + '% 剩余' : '待更新'));
-    const meter = make('span', 'usage-meter'), fill = make('span'); fill.style.width = (fresh ? w.remainingPercent : 0) + '%'; meter.append(fill); item.append(meter); summary.append(item);
-  }
-  if (!usageWindows.length) summary.textContent = '暂无记录 · 点击查看';
-  el('usage-summary').title = s.usage?.timestamp ? '本机缓存 · 非实时\n' + new Date(s.usage.timestamp).toLocaleString() + '\n点击查看重置时间与详情' : '点击查看本机用量；不发起模型请求';
   updateFind(false);
   el('input').disabled = pendingTabChange || !!s.loadingScope || !!s.storageBlocked;
   const chat = s.chats.find(c => c.id === s.activeId);
@@ -268,7 +270,6 @@ function render(s) {
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
   el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
-  el('usage-summary').onclick = () => post('usage');
 for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.operationLocked || s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
   syncSend();

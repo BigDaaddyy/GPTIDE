@@ -99,11 +99,14 @@ class Chat {
     if(this.chats.find(c=>c.id===this.activeId)?.archived)this.activeId=this.chats.find(c=>!c.archived)?.id;this.openChatIds=this.openChatIds.filter(id=>!this.chats.find(c=>c.id===id)?.archived);if (this.activeId) this.select(this.activeId); else this.newChat();
     if (this.bridge) this.status = '项目进度已加载'; else if (!this.preferences.autoConnect) this.status = '未连接 · 发送时连接'; this.post();
   }
-  async importCursor() {
+  async importCursor(force = false) {
     if (!this.project) return;
     try {
-      const { stdout } = await exec(path.join(this.root, 'runtime', 'node.exe'), ['--disable-warning=ExperimentalWarning', path.join(this.root, 'tools', 'cursor-import.cjs'), this.project, vscode.workspace.getConfiguration('gptide').get('cursorUserPath') || ''], { windowsHide: true, maxBuffer: 100 * 1024 * 1024, timeout: 60000 });
-      const result = JSON.parse(stdout); this.cursorCount = result.chats.length;
+      const userRoot = vscode.workspace.getConfiguration('gptide').get('cursorUserPath') || path.join(process.env.APPDATA || '', 'Cursor', 'User');
+      const result = await require('./cursor-cache.cjs').cachedImport({project:this.project,userRoot,file:path.join(this.data,this.projectKey+'.cursor-cache.json'),force,load:async()=>{
+        const { stdout } = await exec(path.join(this.root, 'runtime', 'node.exe'), ['--disable-warning=ExperimentalWarning', path.join(this.root, 'tools', 'cursor-import.cjs'), this.project, userRoot], { windowsHide: true, maxBuffer: 100 * 1024 * 1024, timeout: 60000 });
+        return JSON.parse(stdout);
+      }}); this.cursorCount = result.chats.length;
       if (this.invalidated) return;
       const native = this.chats.filter(c => c.source !== 'cursor'); this.chats = [...native, ...result.chats.filter(c => !this.hiddenCursorIds.includes(c.id)).map(c => ({ ...c, ...this.cursorChatMetadata?.[c.id], projectKey: this.projectKey }))];
       this.drafts?.apply(this.chats);
@@ -671,7 +674,7 @@ class Chat {
       this.baseline = mode === 'agent' ? review.snapshot(this.project) : null; this.candidates = new Map();
       const active = this.chats.find(c => c.id === this.activeId); active.tasks ||= []; this.tasks = active.tasks; active.taskTurn = (active.taskTurn || 0) + 1; this.currentTaskTurn = active.taskTurn;
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
-      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model }); if (!this.save()) throw new Error(this.historyWarning); this.post();
+      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model, createdAt: Date.now() }); if (!this.save()) throw new Error(this.historyWarning); this.post();
       const sentChatId = this.activeId, sentThreadId = this.threadId;
       this.pendingSubmission = { epoch, ids: [...new Set([submittedChatId, sentChatId])], draftText: submittedDraftText, draftVersion: submittedDraftVersion, attachmentIds: submittedAttachmentIds, chatId: sentChatId, threadId: sentThreadId, clientSendId, queueId, clearDraft: !queueId };
       const instruction = mode === 'plan' ? '请先调查项目并给出具体实施计划、涉及文件和验证步骤。本轮只做计划，不修改文件。\n\n' : '';
@@ -737,7 +740,7 @@ class Chat {
     }
     if (method === 'item/agentMessage/delta' && typeof p.itemId === 'string' && typeof p.delta === 'string') {
       let item = this.messages.find(m => m.itemId === p.itemId);
-      if (!item) { item = { role: 'assistant', text: '', itemId: p.itemId }; this.messages.push(item); }
+      if (!item) { item = { role: 'assistant', text: '', itemId: p.itemId, createdAt: Date.now() }; this.messages.push(item); }
       item.text += p.delta; (this.streamUpdates ||= new Set()).add(this.messages.indexOf(item)); this.schedulePost();
     }
     if (method === 'item/started') { this.activity = p.item?.type === 'commandExecution' ? '运行：' + p.item.command : p.item?.type === 'fileChange' ? '正在修改文件' : '正在处理项目'; this.post(); }
@@ -746,7 +749,7 @@ class Chat {
     }
     if (method === 'item/completed' && p.item?.type === 'agentMessage' && typeof p.item.id === 'string') {
       let item = this.messages.find(m => m.itemId === p.item.id);
-      if (!item) { item = { role: 'assistant', text: '', itemId: p.item.id }; this.messages.push(item); }
+      if (!item) { item = { role: 'assistant', text: '', itemId: p.item.id, createdAt: Date.now() }; this.messages.push(item); }
       if (typeof p.item.text === 'string') item.text = p.item.text; this.post();
     }
     if (method === 'turn/completed') this.finishTurn(p.turn);
@@ -827,7 +830,7 @@ class Chat {
         if (msg.type === 'usage') await vscode.commands.executeCommand('gptide.usage');
         if (msg.type === 'export') await this.exportChat();
         if (msg.type === 'copyTasks' && Array.isArray(msg.ids)) { const ids = new Set(msg.ids.filter(id => typeof id === 'string').slice(0, 200)), selected = (this.tasks || []).filter(t => ids.has(t.turnId + ':' + t.id)); await vscode.env.clipboard.writeText(require('./conversation.cjs').taskReport(selected)); }
-        if (msg.type === 'refresh' && !this.actionLocked()) { if (this.storageBlocked) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(); if (!this.select(this.activeId) && !this.select(this.chats[0]?.id)) this.newChat(); if (preferences.values(vscode.workspace.getConfiguration('gptide')).autoConnect) { await this.connect(); await this.refreshAccount(); } }
+        if (msg.type === 'refresh' && !this.actionLocked()) { if (this.storageBlocked) { await vscode.commands.executeCommand('workbench.action.reloadWindow'); return; } await this.importCursor(true); if (!this.select(this.activeId) && !this.select(this.chats[0]?.id)) this.newChat(); if (preferences.values(vscode.workspace.getConfiguration('gptide')).autoConnect) { await this.connect(); await this.refreshAccount(); } }
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
         if (msg.type === 'terminal') await vscode.commands.executeCommand('workbench.action.terminal.toggleTerminal');
@@ -881,7 +884,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.open', () => chat.focusInput().catch(error => vscode.window.showErrorMessage(error.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.exportChat', () => chat.exportChat().catch(e => vscode.window.showErrorMessage(e.message))));
   context.subscriptions.push(vscode.commands.registerCommand('gptide.login', () => chat.login()));
-  context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy || chat.reviewBusy) return vscode.window.showInformationMessage('请先等待当前任务完成'); if (chat.storageBlocked) return vscode.commands.executeCommand('workbench.action.reloadWindow'); await chat.importCursor(); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
+  context.subscriptions.push(vscode.commands.registerCommand('gptide.refresh', async () => { await chat.ready; if (chat.busy || chat.reviewBusy) return vscode.window.showInformationMessage('请先等待当前任务完成'); if (chat.storageBlocked) return vscode.commands.executeCommand('workbench.action.reloadWindow'); await chat.importCursor(true); if (!chat.select(chat.activeId) && !chat.select(chat.chats[0]?.id)) chat.newChat(); }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-before', { provideTextDocumentContent: uri => chat.beforeContent(uri) }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-code', { provideTextDocumentContent: uri => chat.codeContent(uri) }));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('gptide-checkpoint', { provideTextDocumentContent: uri => { const [owner, hash] = uri.path.split('/').filter(Boolean); if (owner !== chat.projectKey) throw new Error('检查点不属于当前项目'); if (hash === 'empty') return ''; if (!chat.checkpointStore) throw new Error('检查点存储不可用'); return chat.checkpointStore.get(hash); } }));
