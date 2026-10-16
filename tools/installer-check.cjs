@@ -39,9 +39,9 @@ async function runtimeClosed(){
   const customized={...JSON.parse(fs.readFileSync(settings)),'editor.fontSize':19,fixture:true};fs.writeFileSync(settings,JSON.stringify(customized));
   await run();assert.deepEqual(JSON.parse(fs.readFileSync(settings)),customized);assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);
   app=await launch();try{const page=await app.firstWindow();await page.waitForSelector('.gptide-home');await page.waitForTimeout(1500);assert.equal(await page.getByRole('button',{name:'暂不导入',exact:true}).count(),0);}finally{await app.close();await runtimeClosed();}
-  // NSIS normally forks the uninstaller into TEMP, so wait for actual removal.
+  // Run in place so the child process result includes the actual uninstall.
   const uninstaller=path.join(installed,'Uninstall.exe');
-  await execute(uninstaller,['/S'],{windowsHide:true,timeout:180000});
+  await execute(uninstaller,['/S',`_?=${installed}`],{windowsHide:true,timeout:180000});
   await waitFor(()=>!fs.existsSync(path.join(installed,'app')),'卸载程序文件');
   assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);
   assert.equal(JSON.parse(fs.readFileSync(settings)).fixture,true);
