@@ -1,5 +1,6 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const child = spawn(path.join(root, 'app', 'GPTIDE.exe'), ['--user-data-dir', path.join(root, 'data', 'user'), '--shared-data-dir', path.join(root, 'data', 'shared'), '--extensions-dir', path.join(root, 'data', 'extensions'), '--new-window', ...process.argv.slice(2)], { detached: true, stdio: 'ignore', windowsHide: false });
+const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(path.join(root, 'app', 'GPTIDE.exe'), ['--user-data-dir', path.join(root, 'data', 'user'), '--shared-data-dir', path.join(root, 'data', 'shared'), '--extensions-dir', path.join(root, 'data', 'extensions'), '--new-window', ...process.argv.slice(2)], { env, detached: true, stdio: 'ignore', windowsHide: false });
 child.on('error', e => { console.error(e.message); process.exitCode = 1; }); child.unref();

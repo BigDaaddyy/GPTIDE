@@ -7,6 +7,7 @@ if (!fs.existsSync(path.join(root, 'app/GPTIDE.exe')) || !fs.existsSync(path.joi
 for (const name of fs.readdirSync(path.join(root, 'builtin'))) if (!fs.readFileSync(path.join(root, 'builtin', name)).equals(fs.readFileSync(path.join(base, 'extensions/gptide-chat', name)))) throw Error('内置运行包与源码不一致：' + name);
 const product = JSON.parse(fs.readFileSync(path.join(base,'product.json')));
 if (product.nameShort !== 'GPTIDE' || product.gptideVersion !== manifest.version || product.sharedDataFolderName !== '.gptide-shared') throw Error('产品身份、版本或共享目录不一致');
+for (const field of ['nameLong','win32DirName','win32NameVersion','win32ShellNameShort']) if (product[field] !== 'GPTIDE') throw Error('产品名称残留：' + field);
 if(!product.extensionEnabledApiProposals?.['gptide.gptide-chat']?.includes('contribSourceControlInputBoxMenu'))throw Error('原生提交输入菜单权限缺失');
 for (const name of ['vs/workbench/workbench.desktop.main.js','vs/workbench/workbench.desktop.main.css']) {
   const content = fs.readFileSync(path.join(base,'out',name));

@@ -11,7 +11,7 @@ function install(vscode, context, root, clock = { now: Date.now, setInterval, cl
   const render = () => {
     if (disposed) return;
     events.emit('change');
-    const w = cached?.primary, state = usage.status(cached, w, clock.now(), staleMinutes());
+    const w = cached?.primary || cached?.secondary, state = usage.status(cached, w, clock.now(), staleMinutes());
     bar.text = state === 'cached' ? `$(dashboard) ${w.remainingPercent}%` : state === 'unknown' ? '$(dashboard) 用量' : '$(history) 用量';
     const summary = state === 'expired' ? '该窗口已过期，当前剩余未知' : state === 'stale' ? '缓存需更新，当前剩余未知' : w ? `记录中剩余 ${w.remainingPercent}%` : '当前窗口未知';
     bar.tooltip = cached ? `${usage.label(w)} · ${summary}\n${cached.source} · ${new Date(cached.timestamp).toLocaleString()} · 非实时\n点击查看全部窗口` : '暂无本机用量记录；点击重新读取，不发起模型请求';

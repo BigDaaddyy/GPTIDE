@@ -8,11 +8,11 @@ const { _electron } = require('../acceptance-env.cjs').playwright;
   const app = await _electron.launch({ executablePath: path.join(root, 'app/VSCodium.exe'), args: ['--user-data-dir', user, '--extensions-dir', path.join(user, 'extensions'), '--skip-welcome', project], env });
   try {
     const page = await app.firstWindow(); await page.waitForSelector('.monaco-workbench');
-    await page.keyboard.press('Control+Shift+P'); await page.locator('.quick-input-widget input').fill('>GptIDE: 快速查看用量');
+    await page.keyboard.press('Control+Shift+P'); await page.locator('.quick-input-widget input').fill('>GPTIDE: 快速查看用量');
     await page.getByRole('option').filter({ hasText: '快速查看用量' }).first().click();
     await page.locator('.quick-input-title').filter({ hasText: 'ChatGPT 用量' }).waitFor();
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Control+Shift+P'); await page.locator('.quick-input-widget input').fill('>GptIDE: 本机诊断');
+    await page.keyboard.press('Control+Shift+P'); await page.locator('.quick-input-widget input').fill('>GPTIDE: 本机诊断');
     await page.getByRole('option').filter({ hasText: '本机诊断' }).first().click();
     await page.locator('.view-line').filter({ hasText: 'disconnected' }).first().waitFor();
     console.log('Offline project starts disconnected; quota and diagnostics commands passed. No model request.');

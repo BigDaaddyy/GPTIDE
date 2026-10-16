@@ -32,3 +32,14 @@ test('cache update during a pending read is reread, and disposal blocks late UI 
     usage.read = () => new Promise(done => { resolve = done; }); ui.interval(); const before = ui.bar.text; ui.dispose(); resolve(snapshot(90)); await tick(); assert.equal(ui.bar.text, before);
   } finally { ui.dispose(); usage.read = oldRead; await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test('weekly-only records remain visible in the status bar and shared quota snapshot', async () => {
+  const oldRead = usage.read, now = { value: Date.now() };
+  usage.read = async () => usage.normalize({ secondary: { usedPercent: 23, windowDurationMins: 10080 } }, new Date(now.value).toISOString(), 'fixture');
+  const ui = setup(path.join(os.tmpdir(), 'gptide-weekly-only'), now);
+  try {
+    await tick(); assert.match(ui.bar.text, /77%/); assert.match(ui.bar.tooltip, /每周/);
+    assert.equal(ui.controller.snapshot().windows.length, 1);
+    assert.equal(ui.controller.snapshot().windows[0].label, '每周');
+  } finally { ui.dispose(); usage.read = oldRead; }
+});

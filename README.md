@@ -4,7 +4,7 @@
 
 基于 VSCodium，内置 ChatGPT / Codex 编程助手。打开项目就能继续工作，不需要另装聊天插件。
 
-![GPTIDE](assets/logo.svg)
+<img src="assets/logo.svg" alt="GPTIDE" width="64" height="64">
 
 ## 使用
 

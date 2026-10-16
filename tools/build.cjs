@@ -8,9 +8,13 @@ fs.copyFileSync(path.join(root,'assets/logo.svg'),path.join(app,'resources/app/o
 for (const [from,to] of [['icon.ico','win32/code.ico'],['icon.png','win32/code_150x150.png'],['icon.png','win32/code_70x70.png']]) fs.copyFileSync(path.join(root,'assets',from),path.join(app,'resources/app/resources',to));
 const brandedExe=path.join(app,'GPTIDE.exe'), iconStamp=path.join(app,'.gptide-icon-sha256'), iconHash=require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(root,'assets/icon.ico'))).update(fs.readFileSync(path.join(app,'VSCodium.exe'))).digest('hex');
 if(process.platform==='win32'&&(!fs.existsSync(brandedExe)||!fs.existsSync(iconStamp)||fs.readFileSync(iconStamp,'utf8')!==iconHash)){
-fs.copyFileSync(path.join(app,'VSCodium.exe'),brandedExe);
-require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'app-icon.ps1'),'-Executable',brandedExe,'-Icon',path.join(root,'assets/icon.ico')],{windowsHide:true,stdio:'pipe'});
+const candidate=path.join(app,'GPTIDE.build.exe');
+try {
+fs.copyFileSync(path.join(app,'VSCodium.exe'),candidate);
+require('node:child_process').execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'app-icon.ps1'),'-Executable',candidate,'-Icon',path.join(root,'assets/icon.ico')],{windowsHide:true,stdio:'pipe'});
+fs.renameSync(candidate,brandedExe);
 fs.writeFileSync(iconStamp,iconHash);
+} finally { fs.rmSync(candidate,{force:true}); }
 }
 // Reproducible native styling; replace our block instead of accumulating it.
 const workbenchCss = path.join(app, 'resources', 'app', 'out', 'vs', 'workbench', 'workbench.desktop.main.css');
@@ -30,7 +34,7 @@ for (const name of fs.readdirSync(path.join(root, 'builtin'))) fs.copyFileSync(p
 const runtime = path.join(root, 'runtime'); fs.mkdirSync(runtime, { recursive: true }); fs.copyFileSync(process.execPath, path.join(runtime, 'node.exe'));
 const productFile = path.join(app, 'resources', 'app', 'product.json'); const product = JSON.parse(fs.readFileSync(productFile, 'utf8'));
 product.extensionEnabledApiProposals ||= {};product.extensionEnabledApiProposals['gptide.gptide-chat']=['contribSourceControlInputBoxMenu'];
-Object.assign(product, { nameShort: 'GPTIDE', nameLong: 'GPTIDE', gptideVersion: require('../package.json').version, applicationName: 'gptide', dataFolderName: '.gptide', sharedDataFolderName: '.gptide-shared', win32AppUserModelId: 'GptIDE.Desktop', urlProtocol: 'gptide' });
+Object.assign(product, { nameShort: 'GPTIDE', nameLong: 'GPTIDE', win32DirName: 'GPTIDE', win32NameVersion: 'GPTIDE', win32ShellNameShort: 'GPTIDE', gptideVersion: require('../package.json').version, applicationName: 'gptide', dataFolderName: '.gptide', sharedDataFolderName: '.gptide-shared', win32AppUserModelId: 'GptIDE.Desktop', urlProtocol: 'gptide' });
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.css'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchCss)).digest('base64').replace(/=+$/, '');
 if (product.checksums) product.checksums['vs/workbench/workbench.desktop.main.js'] = require('node:crypto').createHash('sha256').update(fs.readFileSync(workbenchJs)).digest('base64').replace(/=+$/, '');
 fs.writeFileSync(productFile, JSON.stringify(product, null, 2));
