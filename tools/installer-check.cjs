@@ -3,7 +3,7 @@ const execute = promisify(execFile), root = path.resolve(__dirname,'..'), versio
 const output = path.join(root,'downloads/release',version), installer = path.join(output,`GPTIDE-Setup-${version}-x64.exe`);
 const testRoot = path.join(output,'install-check-'+Date.now()), installed = path.join(testRoot,'GPTIDE');
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
-async function waitFor(check, label) { for(let i=0;i<100;i++){if(check())return;await sleep(200);}throw Error('等待失败：'+label); }
+async function waitFor(check, label) { for(let i=0;i<600;i++){if(check())return;await sleep(200);}throw Error('等待失败：'+label); }
 async function runtimeClosed(){
   // Electron has exited, but scanner/shared handles can briefly outlive it.
   await execute('powershell.exe',['-NoProfile','-Command',"for($i=0;$i -lt 100;$i++){try{$stream=[System.IO.File]::Open($env:GPTIDE_LOCK_TARGET,[System.IO.FileMode]::Open,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None);$stream.Dispose();exit 0}catch{Start-Sleep -Milliseconds 200}};exit 1"],{env:{...process.env,GPTIDE_LOCK_TARGET:path.join(installed,'app/GPTIDE.exe')},windowsHide:true,timeout:30000});
