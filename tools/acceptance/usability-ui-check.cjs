@@ -69,6 +69,15 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     await page.getByRole('button',{name:'Keep',exact:true}).click();let decision=await page.evaluate(()=>qaMessages.at(-1));assert.equal(decision.type,'reviewAction');assert.equal(decision.action,'keep');assert.equal(decision.id,'compact');await page.getByRole('button',{name:'Undo',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).action),'undo');await page.getByRole('button',{name:'Review',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'changes');
     const histories=[{id:'regular',name:'Recent',updatedAt:20,count:2},{id:'pinned',name:'Pinned',updatedAt:1,count:1,pinned:true},{id:'archived',name:'Archived conversation',updatedAt:30,count:3,archived:true}];
     await publish({history:histories});await page.locator('#history').click();assert.ok((await page.locator('.history-open').first().innerText()).includes('Pinned'));assert.equal(await page.locator('.history-row').count(),2);await page.locator('.history-row').first().getByRole('button',{name:'More options',exact:true}).click();await page.getByRole('button',{name:'Rename',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).id),'pinned');assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'rename');await page.locator('#history-archived').click();assert.equal(await page.locator('.history-row').count(),1);await page.getByRole('button',{name:'恢复对话',exact:true}).click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'archiveChat');assert.equal(await page.evaluate(()=>qaMessages.at(-1).value),false);await page.screenshot({path:path.join(env.artifacts,'history-archived-300.png')});
-    console.log('Compact layout, project history Pin/Archive/More targeting, Code Review controls, operation locks and narrow widths passed.');
+    await publish({openChatIds:['a'],chats:[{id:'a',name:'短标题'}]});
+    const singleTab=await page.locator('.chat-tab').boundingBox();assert.ok(singleTab.width<190,'Single tab must not stretch across the toolbar');
+    await publish();await page.locator('#input').fill('中键关闭保留草稿');
+    await page.locator('.chat-tab').nth(1).click({button:'middle'});
+    assert.equal(await page.evaluate(()=>qaMessages.at(-1).type),'closeTab');assert.equal(await page.evaluate(()=>qaMessages.at(-1).id),'b');
+    await publish({operationLocked:true});const closeCount=await page.evaluate(()=>qaMessages.filter(m=>m.type==='closeTab').length);
+    await page.locator('.chat-tab').first().dispatchEvent('auxclick',{button:1,bubbles:true});assert.equal(await page.evaluate(()=>qaMessages.filter(m=>m.type==='closeTab').length),closeCount);
+    await publish();await page.locator('.chat-tab').first().click({button:'middle'});
+    assert.equal(await page.evaluate(()=>qaMessages.at(-1).id),'a');assert.equal(await page.evaluate(()=>qaMessages.at(-1).draft),'中键关闭保留草稿');
+    console.log('Compact layout, project history, review, tab sizing, middle-click close, drafts and operation locks passed.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

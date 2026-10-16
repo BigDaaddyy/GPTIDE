@@ -223,7 +223,12 @@ function render(s) {
       const tab = make('div', 'chat-tab' + (s.activeId === id ? ' active' : ''));
       const button = make('button', 'chat-tab-name', chat.name); button.dataset.chatId = id; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(s.activeId === id)); button.disabled = s.busy; button.title = chat.name; button.onclick = () => post('select', { id });
       button.disabled = s.operationLocked || s.busy || s.reviewBusy; button.tabIndex = s.activeId === id ? 0 : -1; button.onclick = () => { flushDraft(); if (id !== state.activeId) beginTabChange(); post('select', { id }); };
-      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭 Tab'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.operationLocked || s.busy || s.reviewBusy; close.tabIndex = -1; close.onclick = () => { flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); }; tab.append(button, close); el('chat-tabs').append(tab);
+      const close = make('button', 'chat-tab-close', '×'); close.title = '关闭对话（也可点击鼠标中键）'; close.setAttribute('aria-label', '关闭 ' + chat.name); close.disabled = s.operationLocked || s.busy || s.reviewBusy; close.tabIndex = -1;
+      const closeTab = () => { if (close.disabled) return; flushDraft(); if (id === state.activeId) beginTabChange(); post('closeTab', { id, draft: id === draftKey ? el('input').value : drafts[id] }); };
+      close.onclick = closeTab;
+      tab.onmousedown = e => { if (e.button === 1) e.preventDefault(); };
+      tab.onauxclick = e => { if (e.button !== 1) return; e.preventDefault(); closeTab(); };
+      tab.append(button, close); el('chat-tabs').append(tab);
     }
   }
   const nextKey = s.activeId || '__new__';
