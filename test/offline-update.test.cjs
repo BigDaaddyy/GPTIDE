@@ -1,5 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const core=require('../tools/update-core.cjs'),offline=require('../tools/offline-update.cjs');
+test('background installation cannot be queued without explicit user upgrade consent',async()=>{
+  await assert.rejects(require('../tools/local-install-update.cjs').queue('unused','unused','unused'),/同意升级/);
+});
 test('small offline updater verifies an exact installed baseline and stages changes without modifying it',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-offline-update-'));t.after(()=>core.removeTree(path.dirname(dir),path.basename(dir)));
   const root=path.join(dir,'install'),fresh=path.join(dir,'fresh'),bundle=path.join(dir,'bundle'),data=path.join(dir,'data');for(const folder of [root,fresh,bundle,data])fs.mkdirSync(folder);

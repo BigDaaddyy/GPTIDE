@@ -19,7 +19,7 @@ function canAutoRestart(vscode,isBusy){
   return !isBusy()&&!(vscode.workspace?.textDocuments||[]).some(d=>d.isDirty)&&!(vscode.workspace?.notebookDocuments||[]).some(d=>d.isDirty)&&vscode.workspace?.workspaceFile?.scheme!=='untitled'&&!vscode.debug?.activeDebugSession;
 }
 function install(vscode,context,root,isBusy=()=>false){
-  const core=require(path.join(root,'tools/update-core.cjs'));let checking=false,installing=false,pollTimer,autoTimer,cleanupTimer,disposed=false,activeController,ready;
+  const core=require(path.join(root,'tools/update-core.cjs'));let checking=false,installing=false,pollTimer,autoTimer,cleanupTimer,disposed=false,activeController,ready,approvedVersion,deferredVersion;
   const autoEnabled=()=>vscode.workspace?.getConfiguration?.('gptide').get('updates.autoDownload',true)!==false;
   context.subscriptions.push({dispose:()=>{disposed=true;clearInterval(pollTimer);clearTimeout(autoTimer);clearTimeout(cleanupTimer);activeController?.abort();}});
   const bar=vscode.window.createStatusBarItem('gptide.updates',vscode.StatusBarAlignment.Right,47);bar.name='GPTIDE 更新';bar.command='gptide.checkForUpdates';context.subscriptions.push(bar);
@@ -41,22 +41,25 @@ function install(vscode,context,root,isBusy=()=>false){
     core.verify(prepared.staged,core.delta(base,prepared.next).changed);
     ready={...prepared,folder};showReady();
   }
+  async function requestUpgrade(version,bytes,automatic,downloaded=false){
+    if(approvedVersion===version)return true;
+    if(automatic&&deferredVersion===version)return false;
+    const size=Number.isFinite(bytes)?`，增量下载 ${(bytes/1024**2).toFixed(1)} MB`:'';
+    const choice=await vscode.window.showInformationMessage(`发现 GPTIDE ${version}${downloaded?'（已下载）':size}。是否升级？升级后将重新打开当前窗口。`,'升级并重启','稍后');
+    if(disposed)return false;
+    if(choice!=='升级并重启'){deferredVersion=version;return false;}
+    approvedVersion=version;deferredVersion=undefined;return true;
+  }
   async function offerRestart(automatic=false){
     if(!ready||disposed)return;
     showReady();if(isBusy())return;
-    const autoInstall=vscode.workspace?.getConfiguration?.('gptide').get('updates.autoInstall',true)!==false;
-    if(automatic&&!autoInstall)return;
-    if(automatic&&autoInstall){
-      const failed=context.globalState.get('gptide.failedAutoUpdate');
-      if(failed?.root===root&&failed.version===ready.next.version){bar.tooltip='上次自动更新未完成，点击手动重试';return;}
-      if(!canAutoRestart(vscode,isBusy)){bar.tooltip='更新已准备，等待任务结束和文件保存；点击可手动重启';return;}
-    }else{
-      const choice=await vscode.window.showInformationMessage('GPTIDE '+ready.next.version+' 增量更新已准备好，重启后安装；未保存文件会提示保存。','重启更新','稍后');
-      if(choice!=='重启更新'||disposed)return;if(isBusy())throw Error('Agent 任务正在运行，请稍后更新');
-    }
+    const failed=context.globalState.get('gptide.failedAutoUpdate');
+    if(automatic&&failed?.root===root&&failed.version===ready.next.version){bar.tooltip='上次更新未完成，点击手动重试';return;}
+    if(!await requestUpgrade(ready.next.version,undefined,automatic,true))return;
+    if(!canAutoRestart(vscode,isBusy)){bar.tooltip='已同意升级，等待任务结束和文件保存；点击可查看';return;}
     core.verify(root,ready.base.files);core.verify(ready.staged,core.delta(ready.base,ready.next).changed);
-    if(automatic&&autoInstall&&!canAutoRestart(vscode,isBusy))return;
-    const {folder,...prepared}=ready;await restart(folder,prepared,automatic&&autoInstall);
+    if(!canAutoRestart(vscode,isBusy))return;
+    const {folder,...prepared}=ready;await restart(folder,prepared,true);
   }
   async function restart(folder,prepared,automatic=false){
     const args=restartArgs(vscode.workspace,require('./data-paths.cjs').locations());
@@ -94,6 +97,7 @@ function install(vscode,context,root,isBusy=()=>false){
           const current=require('./package.json').version,latest=release.tag_name?.replace(/^v/,'');if(!/^\d+\.\d+\.\d+$/.test(latest)||release.draft||release.prerelease)throw Error('GitHub 发布版本无效');
           if(!newer(latest,current)){bar.hide();if(!automatic)await vscode.window.showInformationMessage('当前已是最新版本（'+current+'）');return null;}
           bar.text='$(cloud-download) '+latest;bar.tooltip='GPTIDE 有新版本，点击更新';bar.show();
+          if(automatic&&deferredVersion===latest)return null;
           const baseline=path.join(root,'gptide-release.json');
           if(!fs.existsSync(baseline)||!fs.existsSync(path.join(root,'installation.ini'))){if(automatic)return null;const action=await vscode.window.showInformationMessage('当前安装尚不支持增量更新，请安装一次新版完整安装包','打开下载页');if(action)await vscode.env.openExternal(vscode.Uri.parse(RELEASES));return null;}
           const base=core.validateInstalled(JSON.parse(fs.readFileSync(baseline)));if(base.version!==current)throw Error('安装清单版本不一致，请使用完整安装包修复');
@@ -102,7 +106,7 @@ function install(vscode,context,root,isBusy=()=>false){
           const manifestFile=path.join(folder,'update-manifest.json');await network.download(API+'/releases/assets/'+manifestAsset.id,manifestFile,{token,signal:controller.signal,bytes:manifestAsset.size});if('sha256:'+core.hash(manifestFile)!==manifestAsset.digest)throw Error('更新清单校验失败');
           const update=JSON.parse(fs.readFileSync(manifestFile)),delta=selectDelta(core,release,update,base);
           if(!delta){if(automatic){bar.tooltip='新版没有匹配当前安装的增量包，点击查看';return null;}const action=await vscode.window.showInformationMessage('没有适用于当前版本的增量包，可使用完整安装包更新','打开下载页');if(action)await vscode.env.openExternal(vscode.Uri.parse(RELEASES));return null;}
-          if(!automatic){const action=await vscode.window.showInformationMessage(`GPTIDE ${latest} · 增量下载 ${(delta.item.bytes/1024**2).toFixed(1)} MB`,'下载更新');if(!action)return null;}
+          if(!await requestUpgrade(latest,delta.item.bytes,automatic))return null;
           progress.report({message:'校验当前安装文件…'});core.verify(root,base.files);if(controller.signal.aborted)return null;
           const archive=path.join(folder,delta.item.name);let reported=0;
           await network.download(API+'/releases/assets/'+delta.file.id,archive,{token,signal:controller.signal,bytes:delta.item.bytes,onProgress:value=>{const percent=Math.floor(value*100);if(percent>reported){progress.report({increment:percent-reported,message:'下载更新 '+percent+'%'});reported=percent;}}});
@@ -117,7 +121,7 @@ function install(vscode,context,root,isBusy=()=>false){
       await context.globalState.update('gptide.readyUpdate',{root,folder});ready={...prepared,folder};
       await offerRestart(automatic);
     }catch(error){if(error.name!=='AbortError'){if(automatic){bar.text='$(warning) 更新检查失败';bar.tooltip=error.message+'；点击重试';bar.show();}else await vscode.window.showErrorMessage('更新未完成：'+error.message+'。可使用完整安装包更新。');}}
-    finally{checking=false;activeController=undefined;if(lock)try{fs.unlinkSync(lock);}catch{}if(folder&&!installing&&folder!==ready?.folder){try{core.removeTree(path.dirname(folder),path.basename(folder));}catch{}}}
+    finally{checking=false;if(activeController?.signal.aborted)approvedVersion=undefined;activeController=undefined;if(lock)try{fs.unlinkSync(lock);}catch{}if(folder&&!installing&&folder!==ready?.folder){try{core.removeTree(path.dirname(folder),path.basename(folder));}catch{}}}
   }
   context.subscriptions.push(vscode.commands.registerCommand('gptide.checkForUpdates',()=>check(false)));
   async function autoCheck(){if(disposed)return;try{if(autoEnabled())await check(true);}finally{if(!disposed){autoTimer=setTimeout(autoCheck,ready||isBusy()?60000:6*60*60*1000);autoTimer.unref?.();}}}

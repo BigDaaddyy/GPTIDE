@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),{spawn,execFile}=require('node:child_process'),{promisify}=require('node:util'),core=require('./update-core.cjs');
-async function queue(root,release,stage){
+async function queue(root,release,stage,{confirmed=false}={}){
+  if(!confirmed)throw Error('必须先获得用户同意升级，才能安排安装');
   root=path.resolve(root);release=path.resolve(release);stage=path.resolve(stage);
   const before=JSON.parse(fs.readFileSync(path.join(root,'gptide-release.json'))).version;
   const prepared=await require('./offline-update.cjs').prepare(root,release,stage);
@@ -20,5 +21,5 @@ async function supervise(planFile,report){
     if(outcome.ok)core.removeTree(path.dirname(folder),path.basename(folder));
   }catch(error){fs.writeFileSync(report,JSON.stringify({ok:false,error:error.message}));}
 }
-if(require.main===module)(process.argv[2]==='--wait'?supervise(process.argv[3],process.argv[4]):queue(process.argv[2],process.argv[3],process.argv[4]).then(value=>console.log(JSON.stringify(value)))).catch(error=>{console.error(error.message);process.exitCode=1;});
+if(require.main===module)(process.argv[2]==='--wait'?supervise(process.argv[3],process.argv[4]):queue(process.argv[2],process.argv[3],process.argv[4],{confirmed:process.argv[5]==='--confirmed'}).then(value=>console.log(JSON.stringify(value)))).catch(error=>{console.error(error.message);process.exitCode=1;});
 module.exports={queue};

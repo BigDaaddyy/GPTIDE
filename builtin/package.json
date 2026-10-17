@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GPTIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -242,17 +242,11 @@
     "configuration": {
       "title": "GPTIDE",
       "properties": {
-        "gptide.updates.autoInstall": {
-          "type": "boolean",
-          "scope": "application",
-          "default": true,
-          "description": "自动下载完成后，任务空闲且没有未保存文件时，自动重启当前窗口并安装增量更新。"
-        },
         "gptide.updates.autoDownload": {
           "type": "boolean",
           "scope": "application",
           "default": true,
-          "description": "启动后后台检查并下载匹配的增量更新。准备好后提示重启，不自动中断任务或关闭编辑器。"
+          "description": "启动后后台检查新版本，询问用户是否升级；只有同意后才下载增量包并重启安装。"
         },
         "gptide.codexPath": {
           "type": "string",
