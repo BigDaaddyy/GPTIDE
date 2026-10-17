@@ -3,6 +3,27 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const { pathToFileURL } = require('node:url'); const { DatabaseSync } = require('node:sqlite');
 const { importProject } = require('../tools/cursor-import.cjs');
 
+for (const failCopy of [false, true]) test(`Cursor snapshot is removed after ${failCopy ? 'copy failure' : 'successful import'} even when recursive rm is ineffective`, t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-fixture-'));
+  const global = path.join(root, 'globalStorage'); fs.mkdirSync(global);
+  const source = path.join(global, 'state.vscdb'), db = new DatabaseSync(source);
+  db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY,value BLOB)'); db.close();
+  const original = fs.readFileSync(source), snapshots = [], makeTemp = fs.mkdtempSync, copy = fs.copyFileSync;
+  t.mock.method(fs, 'mkdtempSync', prefix => { const folder = makeTemp(prefix); snapshots.push(folder); return folder; });
+  t.mock.method(fs, 'rmSync', () => {});
+  if (failCopy) t.mock.method(fs, 'copyFileSync', (...args) => { copy(...args); throw Error('injected snapshot copy failure'); });
+  try {
+    const result = importProject(path.join(root, '项目'), root);
+    assert.equal(snapshots.length, 1);
+    assert.equal(fs.existsSync(snapshots[0]), false);
+    assert.equal(result.warnings.length, failCopy ? 1 : 0);
+    assert.deepEqual(fs.readFileSync(source), original);
+  } finally {
+    t.mock.restoreAll();
+    require('../tools/update-core.cjs').removeTree(path.dirname(root), path.basename(root));
+  }
+});
+
 test('modern global headers import only exact project roots without a local index', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-modern-'));
   try {

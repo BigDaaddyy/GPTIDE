@@ -7,6 +7,19 @@ const { DatabaseSync } = require('node:sqlite');
 function normalize(p) { return path.resolve(p).replace(/[\\/]+$/, '').replaceAll('\\', '/').toLowerCase(); }
 function decode(value) { try { return JSON.parse(Buffer.isBuffer(value) || value instanceof Uint8Array ? Buffer.from(value).toString('utf8') : value); } catch { return null; } }
 function uriPath(uri) { try { return fileURLToPath(uri); } catch { return ''; } }
+function removeSnapshot(temp) {
+  const base = path.resolve(os.tmpdir()), folder = path.resolve(temp);
+  if (path.dirname(folder) !== base || !/^gptide-cursor-[A-Za-z0-9]+$/.test(path.basename(folder))) throw Error('临时快照路径不合法');
+  function visit(file) {
+    const stat = fs.lstatSync(file);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      for (const name of fs.readdirSync(file)) visit(path.join(file, name));
+      fs.rmdirSync(file);
+    } else fs.unlinkSync(file);
+  }
+  // Avoid recursive rmSync: it can silently leave snapshots on Windows.
+  visit(folder);
+}
 function snapshot(file, temp, name) {
   if (!fs.existsSync(file)) return null;
   const destination = path.join(temp, name);
@@ -94,7 +107,10 @@ function importProject(project, userRoot) {
     for (const id of metadataWorkspaces(global, project)) if (!ambiguousIds.has(id)) { matchedIds.add(id); consume(modernHeaders(global, id), null); }
     matchedWorkspaces = matchedIds.size;
   } catch (e) { warnings.push(e.message); }
-  finally { for (const db of open) db.close(); fs.rmSync(temp, { recursive: true, force: true }); }
+  finally {
+    for (const db of open) { try { db.close(); } catch (e) { warnings.push(`关闭临时数据库失败：${e.message}`); } }
+    try { removeSnapshot(temp); } catch (e) { warnings.push(`清理临时快照失败：${e.message}`); }
+  }
   return { chats: [...chats.values()].sort((a, b) => b.updatedAt - a.updatedAt), warnings, matchedWorkspaces };
 }
 if (require.main === module) {
