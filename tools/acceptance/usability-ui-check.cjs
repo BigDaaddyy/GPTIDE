@@ -17,6 +17,11 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
       await page.locator('#approval-toggle').click();const panel=await page.locator('#approval-panel').boundingBox();assert.ok(panel.x>=0&&panel.x+panel.width<=width);await page.keyboard.press('Escape');
     }
     await page.screenshot({path:path.join(env.artifacts,'approval-inline.png')});
+    const modelWidth=await page.locator('#model-toggle').boundingBox();assert.ok(modelWidth.width<110,'Model trigger must fit its label instead of filling empty space');
+    await page.locator('#mode').hover();await page.waitForTimeout(160);
+    const modeStyle=await page.locator('#mode').evaluate(e=>({appearance:getComputedStyle(e).appearance,background:getComputedStyle(e).backgroundColor,transition:getComputedStyle(e).transitionDuration}));assert.equal(modeStyle.appearance,'none');assert.notEqual(modeStyle.background,'rgba(0, 0, 0, 0)');assert.notEqual(modeStyle.transition,'0s');
+    await page.locator('#mode').selectOption('plan');assert.equal(await page.locator('#mode').inputValue(),'plan');await page.locator('#mode').selectOption('agent');
+    await page.screenshot({path:path.join(env.artifacts,'composer-controls-hover.png')});
     await publish({messages:[{role:'user',text:'时间与消息操作',createdAt:'2026-10-16T10:20:30Z'},{role:'assistant',text:'回复',createdAt:1792146030000}]});
     await page.locator('#input').hover();
     assert.equal(await page.locator('.message.user .role').isHidden(),true);
