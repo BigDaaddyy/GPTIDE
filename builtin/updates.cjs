@@ -15,13 +15,16 @@ function restartArgs(workspace,locations){
   else for(const folder of workspace.workspaceFolders||[]){if(folder.uri.scheme==='file')args.push(folder.uri.fsPath);else args.push('--folder-uri',folder.uri.toString());}
   return args;
 }
+function canAutoRestart(vscode,isBusy){
+  return !isBusy()&&!(vscode.workspace?.textDocuments||[]).some(d=>d.isDirty)&&!(vscode.workspace?.notebookDocuments||[]).some(d=>d.isDirty)&&vscode.workspace?.workspaceFile?.scheme!=='untitled'&&!vscode.debug?.activeDebugSession;
+}
 function install(vscode,context,root,isBusy=()=>false){
   const core=require(path.join(root,'tools/update-core.cjs'));let checking=false,installing=false,pollTimer,autoTimer,cleanupTimer,disposed=false,activeController,ready;
   const autoEnabled=()=>vscode.workspace?.getConfiguration?.('gptide').get('updates.autoDownload',true)!==false;
   context.subscriptions.push({dispose:()=>{disposed=true;clearInterval(pollTimer);clearTimeout(autoTimer);clearTimeout(cleanupTimer);activeController?.abort();}});
   const bar=vscode.window.createStatusBarItem('gptide.updates',vscode.StatusBarAlignment.Right,47);bar.name='GPTIDE 更新';bar.command='gptide.checkForUpdates';context.subscriptions.push(bar);
   const pending=context.globalState.get('gptide.pendingUpdate');
-  if(pending?.result)try{const outcome=JSON.parse(fs.readFileSync(pending.result,'utf8'));vscode.window[outcome.ok?'showInformationMessage':'showErrorMessage'](outcome.ok?'GPTIDE 已'+(outcome.recovered?'恢复至 ':'更新至 ')+outcome.version:'更新未完成：'+outcome.error);context.globalState.update('gptide.pendingUpdate',undefined);if(outcome.ok){context.globalState.update('gptide.readyUpdate',undefined);const parent=path.resolve(require('./data-paths.cjs').locations().data,'updates'),folder=path.resolve(path.dirname(pending.result));if(path.dirname(folder)===parent&&/^[a-f0-9-]{36}$/.test(path.basename(folder))){cleanupTimer=setTimeout(()=>{try{core.removeTree(parent,path.basename(folder));}catch{}},8000);cleanupTimer.unref?.();}}}catch{}
+  if(pending?.result)try{const outcome=JSON.parse(fs.readFileSync(pending.result,'utf8'));vscode.window[outcome.ok?'showInformationMessage':'showErrorMessage'](outcome.ok?'GPTIDE 已'+(outcome.recovered?'恢复至 ':'更新至 ')+outcome.version:'更新未完成：'+outcome.error);context.globalState.update('gptide.pendingUpdate',undefined);if(pending.automatic&&!outcome.ok)context.globalState.update('gptide.failedAutoUpdate',{root,version:pending.version});if(outcome.ok){context.globalState.update('gptide.failedAutoUpdate',undefined);context.globalState.update('gptide.readyUpdate',undefined);const parent=path.resolve(require('./data-paths.cjs').locations().data,'updates'),folder=path.resolve(path.dirname(pending.result));if(path.dirname(folder)===parent&&/^[a-f0-9-]{36}$/.test(path.basename(folder))){cleanupTimer=setTimeout(()=>{try{core.removeTree(parent,path.basename(folder));}catch{}},8000);cleanupTimer.unref?.();}}}catch{}
   const journalFile=path.join(root,'.gptide-update/journal.json');
   if(fs.existsSync(journalFile)){bar.text='$(warning) 恢复更新';bar.tooltip='检测到未清理的更新事务，点击检查并恢复';bar.show();}
   const newFolder=()=>{const folder=path.join(require('./data-paths.cjs').locations().data,'updates',crypto.randomUUID());fs.mkdirSync(folder,{recursive:true});return folder;};
@@ -38,22 +41,31 @@ function install(vscode,context,root,isBusy=()=>false){
     core.verify(prepared.staged,core.delta(base,prepared.next).changed);
     ready={...prepared,folder};showReady();
   }
-  async function offerRestart(){
+  async function offerRestart(automatic=false){
     if(!ready||disposed)return;
     showReady();if(isBusy())return;
-    const choice=await vscode.window.showInformationMessage('GPTIDE '+ready.next.version+' 增量更新已准备好，重启后安装；未保存文件会提示保存。','重启更新','稍后');
-    if(choice!=='重启更新'||disposed)return;if(isBusy())throw Error('Agent 任务正在运行，请稍后更新');
+    const autoInstall=vscode.workspace?.getConfiguration?.('gptide').get('updates.autoInstall',true)!==false;
+    if(automatic&&!autoInstall)return;
+    if(automatic&&autoInstall){
+      const failed=context.globalState.get('gptide.failedAutoUpdate');
+      if(failed?.root===root&&failed.version===ready.next.version){bar.tooltip='上次自动更新未完成，点击手动重试';return;}
+      if(!canAutoRestart(vscode,isBusy)){bar.tooltip='更新已准备，等待任务结束和文件保存；点击可手动重启';return;}
+    }else{
+      const choice=await vscode.window.showInformationMessage('GPTIDE '+ready.next.version+' 增量更新已准备好，重启后安装；未保存文件会提示保存。','重启更新','稍后');
+      if(choice!=='重启更新'||disposed)return;if(isBusy())throw Error('Agent 任务正在运行，请稍后更新');
+    }
     core.verify(root,ready.base.files);core.verify(ready.staged,core.delta(ready.base,ready.next).changed);
-    const {folder,...prepared}=ready;await restart(folder,prepared);
+    if(automatic&&autoInstall&&!canAutoRestart(vscode,isBusy))return;
+    const {folder,...prepared}=ready;await restart(folder,prepared,automatic&&autoInstall);
   }
-  async function restart(folder,prepared){
+  async function restart(folder,prepared,automatic=false){
     const args=restartArgs(vscode.workspace,require('./data-paths.cjs').locations());
     for(const name of ['update-core.cjs','update-worker.cjs'])fs.copyFileSync(path.join(root,'tools',name),path.join(folder,name));fs.copyFileSync(path.join(root,'runtime/node.exe'),path.join(folder,'node.exe'));
-    const result=path.join(folder,'result.json'),plan=path.join(folder,'plan.json');fs.writeFileSync(plan,JSON.stringify({root,...prepared,args,result}));await context.globalState.update('gptide.pendingUpdate',{result});
+    const result=path.join(folder,'result.json'),plan=path.join(folder,'plan.json');fs.writeFileSync(plan,JSON.stringify({root,...prepared,args,result,reopenOnTimeout:automatic}));await context.globalState.update('gptide.pendingUpdate',{result,automatic,version:prepared.next?.version,root});
     const child=spawn(path.join(folder,'node.exe'),[path.join(folder,'update-worker.cjs'),plan],{detached:true,stdio:'ignore',windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined}});
     await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();installing=true;
-    pollTimer=setInterval(()=>{try{const outcome=JSON.parse(fs.readFileSync(result));clearInterval(pollTimer);installing=false;context.globalState.update('gptide.pendingUpdate',undefined);if(!outcome.ok)vscode.window.showErrorMessage('更新未完成：'+outcome.error);}catch{}},2000);pollTimer.unref?.();
-    await vscode.commands.executeCommand('workbench.action.quit');
+    pollTimer=setInterval(()=>{try{const outcome=JSON.parse(fs.readFileSync(result));clearInterval(pollTimer);installing=false;context.globalState.update('gptide.pendingUpdate',undefined);if(!outcome.ok){if(automatic)context.globalState.update('gptide.failedAutoUpdate',{root,version:prepared.next?.version});vscode.window.showErrorMessage('更新未完成：'+outcome.error);}}catch{}},2000);pollTimer.unref?.();
+    await vscode.commands.executeCommand(automatic?'workbench.action.closeWindow':'workbench.action.quit');
   }
   async function check(automatic=false){
     if(checking||installing)return;checking=true;
@@ -66,7 +78,7 @@ function install(vscode,context,root,isBusy=()=>false){
         core.recover(root);bar.hide();
       }
       if(!ready)try{loadReady();}catch{await context.globalState.update('gptide.readyUpdate',undefined);}
-      if(ready){await offerRestart();return;}
+      if(ready){await offerRestart(automatic);return;}
       const updates=path.join(require('./data-paths.cjs').locations().data,'updates');fs.mkdirSync(updates,{recursive:true});
       const lockFile=path.join(updates,'check-'+crypto.createHash('sha256').update(root).digest('hex').slice(0,16)+'.lock');
       try{const fd=fs.openSync(lockFile,'wx');lock=lockFile;try{fs.writeFileSync(fd,JSON.stringify({pid:process.pid}));}finally{fs.closeSync(fd);}}
@@ -103,13 +115,13 @@ function install(vscode,context,root,isBusy=()=>false){
       if(!prepared)return;
       fs.writeFileSync(path.join(folder,'prepared.json'),JSON.stringify(prepared));
       await context.globalState.update('gptide.readyUpdate',{root,folder});ready={...prepared,folder};
-      await offerRestart();
+      await offerRestart(automatic);
     }catch(error){if(error.name!=='AbortError'){if(automatic){bar.text='$(warning) 更新检查失败';bar.tooltip=error.message+'；点击重试';bar.show();}else await vscode.window.showErrorMessage('更新未完成：'+error.message+'。可使用完整安装包更新。');}}
     finally{checking=false;activeController=undefined;if(lock)try{fs.unlinkSync(lock);}catch{}if(folder&&!installing&&folder!==ready?.folder){try{core.removeTree(path.dirname(folder),path.basename(folder));}catch{}}}
   }
   context.subscriptions.push(vscode.commands.registerCommand('gptide.checkForUpdates',()=>check(false)));
-  async function autoCheck(){if(disposed)return;try{if(autoEnabled())await check(true);}finally{if(!disposed){autoTimer=setTimeout(autoCheck,isBusy()?60000:6*60*60*1000);autoTimer.unref?.();}}}
+  async function autoCheck(){if(disposed)return;try{if(autoEnabled())await check(true);}finally{if(!disposed){autoTimer=setTimeout(autoCheck,ready||isBusy()?60000:6*60*60*1000);autoTimer.unref?.();}}}
   if(fs.existsSync(path.join(root,'installation.ini'))){autoTimer=setTimeout(autoCheck,12000);autoTimer.unref?.();}
   return {check,autoCheck};
 }
-module.exports={install,newer,asset,selectDelta,restartArgs};
+module.exports={install,newer,asset,selectDelta,restartArgs,canAutoRestart};

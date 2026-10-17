@@ -10,9 +10,26 @@ test('startup downloads fixture delta silently and preserves it for later restar
   let downloads=0;network.json=async()=>release;network.download=async(url,file)=>{downloads++;fs.writeFileSync(file,url.endsWith('/1')?bytes:fs.readFileSync(archive));};
   const commands=new Map(),errors=[],messages=[],saved=new Map(),context={subscriptions:[],globalState:{get:key=>saved.get(key),update:async(key,value)=>saved.set(key,value)}};
   const vscode={StatusBarAlignment:{Right:1},ProgressLocation:{Notification:1},window:{createStatusBarItem:()=>({show(){},dispose(){}}),withProgress:async(options,task)=>task({report(){}},{onCancellationRequested:()=>({dispose(){}})}),showInformationMessage:async(message,...options)=>{messages.push(message);return options[0]==='下载更新'?'下载更新':undefined;},showErrorMessage:async message=>errors.push(message)},commands:{registerCommand:(name,run)=>{commands.set(name,run);return {dispose(){}};}}};
-  const updater=service.install(vscode,context,root);await updater.autoCheck();assert.equal(downloads,2);assert.deepEqual(errors,[]);assert.ok(messages.some(m=>m.includes('增量更新已准备好')));assert.ok(!messages.some(m=>m.includes('增量下载')));core.verify(root,base.files);assert.equal(fs.existsSync(path.join(root,'.gptide-update')),false);assert.ok(saved.get('gptide.readyUpdate'));const folder=saved.get('gptide.readyUpdate').folder;assert.ok(fs.existsSync(path.join(folder,'prepared.json')));
+  vscode.workspace={getConfiguration:()=>({get:(key,fallback)=>key==='updates.autoInstall'?false:fallback})};
+  const updater=service.install(vscode,context,root);await updater.autoCheck();assert.equal(downloads,2);assert.deepEqual(errors,[]);assert.equal(messages.length,0);core.verify(root,base.files);assert.equal(fs.existsSync(path.join(root,'.gptide-update')),false);assert.ok(saved.get('gptide.readyUpdate'));const folder=saved.get('gptide.readyUpdate').folder;assert.ok(fs.existsSync(path.join(folder,'prepared.json')));
   context.subscriptions.forEach(s=>s.dispose?.());
   const second={subscriptions:[],globalState:context.globalState};service.install(vscode,second,root);await commands.get('gptide.checkForUpdates')();assert.equal(downloads,2);assert.deepEqual(errors,[]);second.subscriptions.forEach(s=>s.dispose?.());
+  const Module=require('node:module'),{EventEmitter}=require('node:events'),original=Module.prototype.require,servicePath=require.resolve('../builtin/updates.cjs'),cached=require.cache[servicePath];let autoService,spawned=0,closeCommand;
+  try{delete require.cache[servicePath];Module.prototype.require=function(id){const value=original.apply(this,arguments);if(id!=='node:child_process')return value;return{...value,spawn:()=>{spawned++;const child=new EventEmitter();child.unref=()=>{};queueMicrotask(()=>child.emit('spawn'));return child;}};};autoService=require('../builtin/updates.cjs');}finally{Module.prototype.require=original;require.cache[servicePath]=cached;}
+  let dirty=true;vscode.workspace={getConfiguration:()=>({get:(key,fallback)=>fallback}),get textDocuments(){return[{isDirty:dirty}];}};vscode.commands.executeCommand=async id=>{closeCommand=id;};
+  const automatic={subscriptions:[],globalState:context.globalState},auto=autoService.install(vscode,automatic,root),beforePrompts=messages.length;
+  await auto.autoCheck();assert.equal(spawned,0);assert.equal(messages.length,beforePrompts);
+  dirty=false;await auto.autoCheck();assert.equal(spawned,1);assert.equal(closeCommand,'workbench.action.closeWindow');assert.equal(messages.length,beforePrompts);assert.equal(downloads,2);assert.equal(JSON.parse(fs.readFileSync(path.join(folder,'plan.json'))).reopenOnTimeout,true);
+  automatic.subscriptions.forEach(s=>s.dispose?.());
+});
+
+test('automatic restart waits for agents, unsaved text, notebooks, workspaces and debugging',()=>{
+  const vscode={workspace:{textDocuments:[],notebookDocuments:[]},debug:{}};
+  assert.equal(service.canAutoRestart(vscode,()=>false),true);assert.equal(service.canAutoRestart(vscode,()=>true),false);
+  vscode.workspace.textDocuments=[{isDirty:true}];assert.equal(service.canAutoRestart(vscode,()=>false),false);vscode.workspace.textDocuments=[];
+  vscode.workspace.notebookDocuments=[{isDirty:true}];assert.equal(service.canAutoRestart(vscode,()=>false),false);vscode.workspace.notebookDocuments=[];
+  vscode.workspace.workspaceFile={scheme:'untitled'};assert.equal(service.canAutoRestart(vscode,()=>false),false);delete vscode.workspace.workspaceFile;
+  vscode.debug.activeDebugSession={};assert.equal(service.canAutoRestart(vscode,()=>false),false);
 });
 
 test('startup checks respect the switch, skip busy tasks and never open a login prompt',async t=>{

@@ -4,6 +4,7 @@ const labels = {
   model: '首选模型', defaultMode: '默认模式', reasoningEffort: '默认推理强度', approvalPolicy: '授权策略',
   'agent.networkAccess': 'Agent 网络访问', 'connection.autoConnect': '打开项目时连接', 'connection.timeoutSeconds': '请求超时（秒）',
   'updates.autoDownload': '启动时检查并下载增量更新',
+  'updates.autoInstall': '空闲时自动重启并安装更新',
   'chat.submitKey': '发送快捷键', 'review.maxCheckpoints': '每对话检查点数量', 'review.storageLimitMb': '检查点缓存（MiB）',
   'usage.autoRefreshSeconds': '用量读取间隔（秒）', 'usage.staleAfterMinutes': '用量缓存年龄（分钟）'
 };

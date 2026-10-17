@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GPTIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -242,6 +242,12 @@
     "configuration": {
       "title": "GPTIDE",
       "properties": {
+        "gptide.updates.autoInstall": {
+          "type": "boolean",
+          "scope": "application",
+          "default": true,
+          "description": "自动下载完成后，任务空闲且没有未保存文件时，自动重启当前窗口并安装增量更新。"
+        },
         "gptide.updates.autoDownload": {
           "type": "boolean",
           "scope": "application",
