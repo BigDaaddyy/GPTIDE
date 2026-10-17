@@ -11,6 +11,12 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     const state = { type: 'state', revision: 1, projectKey: 'qa', project: 'C:/qa/很长的项目名称', activeId: 'a', openChatIds: ['a','b'], chats: [{ id: 'a', name: '当前项目对话', source: 'gptide' }, { id: 'b', name: '另外一个对话', source: 'gptide' }], history: [{ id: 'a', name: '当前项目对话', source: 'gptide' }], source: 'gptide', preferences: { autoConnect: false }, models: [], messages: [{ role: 'user', text: 'long/path/'.repeat(30) }, { role: 'assistant', text: '```js\n' + 'const name = "long";'.repeat(50) + '\n```' }], tasks: [], changes: [], attachments: [], draft: '', busy: false, status: '未连接 · 发送时连接' };
     const publish = async extra => page.evaluate(s => window.dispatchEvent(new MessageEvent('message', { data: s })), { ...state, ...extra }); await publish();
     assert.equal(await page.locator('#usage-summary').count(),0,'Quota belongs in the editor status bar');
+    for(const width of [260,300,390]){
+      await page.setViewportSize({width,height:780});
+      const aligned=await page.evaluate(()=>{const model=document.querySelector('#model-toggle').getBoundingClientRect(),approval=document.querySelector('#approval-toggle').getBoundingClientRect(),send=document.querySelector('#send').getBoundingClientRect();return {delta:Math.abs(model.y+model.height/2-approval.y-approval.height/2),right:send.right};});assert.ok(aligned.delta<2);assert.ok(aligned.right<=width);
+      await page.locator('#approval-toggle').click();const panel=await page.locator('#approval-panel').boundingBox();assert.ok(panel.x>=0&&panel.x+panel.width<=width);await page.keyboard.press('Escape');
+    }
+    await page.screenshot({path:path.join(env.artifacts,'approval-inline.png')});
     await publish({messages:[{role:'user',text:'时间与消息操作',createdAt:'2026-10-16T10:20:30Z'},{role:'assistant',text:'回复',createdAt:1792146030000}]});
     await page.locator('#input').hover();
     assert.equal(await page.locator('.message.user .role').isHidden(),true);
