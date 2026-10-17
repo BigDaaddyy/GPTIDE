@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GPTIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -242,6 +242,12 @@
     "configuration": {
       "title": "GPTIDE",
       "properties": {
+        "gptide.updates.autoDownload": {
+          "type": "boolean",
+          "scope": "application",
+          "default": true,
+          "description": "启动后后台检查并下载匹配的增量更新。准备好后提示重启，不自动中断任务或关闭编辑器。"
+        },
         "gptide.codexPath": {
           "type": "string",
           "scope": "application",

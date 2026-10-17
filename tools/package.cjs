@@ -15,7 +15,8 @@ function compiler() {
   if (fs.existsSync(base)) for (const name of fs.readdirSync(base)) { const exe = path.join(base,name,'makensis.exe'); if (fs.existsSync(exe)) return exe; }
   throw Error('未找到 NSIS；设置 GPTIDE_MAKENSIS 为 makensis.exe 的完整路径');
 }
-const makensis=compiler(), compileOnly=process.argv.includes('--compile-only');
+const updateOnly=process.argv.includes('--updates-only'),makensis=updateOnly?null:compiler(), compileOnly=process.argv.includes('--compile-only');
+if(updateOnly&&compileOnly)throw Error('不能同时指定仅增量和仅编译安装包');
 if(!compileOnly){
 fs.mkdirSync(output,{recursive:true});
 // A positive allowlist: never stage data, examples, downloads, git or Codex home.
@@ -48,8 +49,10 @@ if(!compileOnly){
   if(bases===undefined){const releaseRoot=path.dirname(output);bases=fs.readdirSync(releaseRoot).filter(name=>/^\d+\.\d+\.\d+$/.test(name)&&require('../builtin/updates.cjs').newer(version,name)).sort((a,b)=>require('../builtin/updates.cjs').newer(a,b)?-1:1).map(name=>path.join(releaseRoot,name,'update-manifest.json')).filter(file=>fs.existsSync(file)).slice(0,3);}
   if(bases&&typeof bases!=='string'&&(!Array.isArray(bases)||bases.some(file=>typeof file!=='string')))throw Error('增量基线必须为路径或路径数组');
   await require('./update-build.cjs').build(output,bases);
+  require('./offline-update-build.cjs').build(output);
 }
 else {const installed=JSON.parse(fs.readFileSync(path.join(payload,'gptide-release.json'))),expected=JSON.parse(fs.readFileSync(path.join(output,'payload-manifest.json')));if(JSON.stringify(installed)!==JSON.stringify({schema:1,version:expected.version,files:expected.files}))throw Error('安装更新清单已改变');}
+if(updateOnly){console.log(JSON.stringify({version,updateOnly:true,output}));return;}
 const installer = path.join(output,`GPTIDE-Setup-${version}-x64.exe`);
 execFileSync(makensis,['/V2',`/DVERSION=${version}`,`/DSOURCE=${root}`,`/DPAYLOAD=${payload}`,`/DDEFAULTS=${defaults}`,`/DOUTPUT=${installer}`,path.join(root,'tools/installer.nsi')],{stdio:'inherit',windowsHide:true});
 const digest = crypto.createHash('sha256').update(fs.readFileSync(installer)).digest('hex');

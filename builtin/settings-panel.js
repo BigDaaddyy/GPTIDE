@@ -8,7 +8,7 @@ function contextValue() {
 }
 function controls() {
   el('scope').disabled = !!pending;
-  for (const row of rows.values()) { row.input.disabled = !!pending; row.reset.disabled = !!pending; }
+  for (const row of rows.values()) { row.input.disabled = row.reset.disabled = !!pending || !!row.field.applicationOnly && el('scope').value === 'project'; }
   const available = !!data?.project && !!data?.contextAvailable;
   for (const id of ['files','excluded','rules']) el(id).disabled = !available;
   el('choose').disabled = !available || !!pending;

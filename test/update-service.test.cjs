@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const core=require('../tools/update-core.cjs'),network=require('../builtin/update-network.cjs'),service=require('../builtin/updates.cjs');
-test('check-update command downloads and verifies fixture delta, leaves installation untouched when restart is declined',async t=>{
+test('startup downloads fixture delta silently and preserves it for later restart without downloading again',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-update-ui-')),root=path.join(dir,'install'),fresh=path.join(dir,'fresh'),data=path.join(dir,'data');for(const folder of [root,fresh,data])fs.mkdirSync(folder);t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   function file(folder,name,text){fs.mkdirSync(path.dirname(path.join(folder,name)),{recursive:true});fs.writeFileSync(path.join(folder,name),text);return {name,bytes:Buffer.byteLength(text),sha256:core.hash(path.join(folder,name))};}
   const current=require('../builtin/package.json').version,base={schema:1,version:current,files:[file(root,'app/editor.js','old'),...core.REQUIRED_FILES.map(name=>file(root,name,name==='tools/update-core.cjs'?fs.readFileSync(path.resolve(__dirname,'../tools/update-core.cjs'),'utf8'):'fixture'))]},next={schema:1,version:'99.0.0',files:[file(fresh,'app/editor.js','updated'),...base.files.slice(1)]};file(root,'gptide-release.json',JSON.stringify(base));file(root,'installation.ini','Version='+current);
@@ -8,9 +8,19 @@ test('check-update command downloads and verifies fixture delta, leaves installa
   const release={tag_name:'v99.0.0',assets:[{id:1,name:'update-manifest.json',size:bytes.length,digest:'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')},{id:2,name:info.name,size:info.bytes,digest:'sha256:'+info.sha256}]};
   const oldJson=network.json,oldDownload=network.download,oldData=process.env.GPTIDE_DATA_HOME;process.env.GPTIDE_DATA_HOME=data;t.after(()=>{network.json=oldJson;network.download=oldDownload;if(oldData===undefined)delete process.env.GPTIDE_DATA_HOME;else process.env.GPTIDE_DATA_HOME=oldData;});
   let downloads=0;network.json=async()=>release;network.download=async(url,file)=>{downloads++;fs.writeFileSync(file,url.endsWith('/1')?bytes:fs.readFileSync(archive));};
-  const commands=new Map(),errors=[],messages=[],context={subscriptions:[],globalState:{get:()=>undefined,update:async()=>{}}};
+  const commands=new Map(),errors=[],messages=[],saved=new Map(),context={subscriptions:[],globalState:{get:key=>saved.get(key),update:async(key,value)=>saved.set(key,value)}};
   const vscode={StatusBarAlignment:{Right:1},ProgressLocation:{Notification:1},window:{createStatusBarItem:()=>({show(){},dispose(){}}),withProgress:async(options,task)=>task({report(){}},{onCancellationRequested:()=>({dispose(){}})}),showInformationMessage:async(message,...options)=>{messages.push(message);return options[0]==='下载更新'?'下载更新':undefined;},showErrorMessage:async message=>errors.push(message)},commands:{registerCommand:(name,run)=>{commands.set(name,run);return {dispose(){}};}}};
-  service.install(vscode,context,root);await commands.get('gptide.checkForUpdates')();assert.equal(downloads,2);assert.deepEqual(errors,[]);assert.ok(messages.some(m=>m.includes('更新已准备好')));core.verify(root,base.files);assert.equal(fs.existsSync(path.join(root,'.gptide-update')),false);assert.deepEqual(fs.readdirSync(path.join(data,'updates')),[]);context.subscriptions.forEach(s=>s.dispose?.());
+  const updater=service.install(vscode,context,root);await updater.autoCheck();assert.equal(downloads,2);assert.deepEqual(errors,[]);assert.ok(messages.some(m=>m.includes('增量更新已准备好')));assert.ok(!messages.some(m=>m.includes('增量下载')));core.verify(root,base.files);assert.equal(fs.existsSync(path.join(root,'.gptide-update')),false);assert.ok(saved.get('gptide.readyUpdate'));const folder=saved.get('gptide.readyUpdate').folder;assert.ok(fs.existsSync(path.join(folder,'prepared.json')));
+  context.subscriptions.forEach(s=>s.dispose?.());
+  const second={subscriptions:[],globalState:context.globalState};service.install(vscode,second,root);await commands.get('gptide.checkForUpdates')();assert.equal(downloads,2);assert.deepEqual(errors,[]);second.subscriptions.forEach(s=>s.dispose?.());
+});
+
+test('startup checks respect the switch, skip busy tasks and never open a login prompt',async t=>{
+  const data=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-auto-update-')),oldData=process.env.GPTIDE_DATA_HOME;process.env.GPTIDE_DATA_HOME=data;t.after(()=>{if(oldData===undefined)delete process.env.GPTIDE_DATA_HOME;else process.env.GPTIDE_DATA_HOME=oldData;core.removeTree(path.dirname(data),path.basename(data));});
+  const root=path.resolve(__dirname,'..'),old=network.json;let reads=0,enabled=false,busy=false,prompts=0,errors=0;network.json=async()=>{reads++;throw Object.assign(Error('private'),{status:404});};t.after(()=>{network.json=old;});
+  const context={subscriptions:[],globalState:{get:()=>undefined,update:async()=>{}}};
+  const vscode={StatusBarAlignment:{Right:1},workspace:{getConfiguration:()=>({get:()=>enabled})},window:{createStatusBarItem:()=>({show(){},dispose(){}}),showInformationMessage:async()=>{prompts++;},showErrorMessage:async()=>{errors++;}},commands:{registerCommand:()=>({dispose(){}})}};
+  const updater=service.install(vscode,context,root,()=>busy);await updater.autoCheck();assert.equal(reads,0);enabled=true;busy=true;await updater.autoCheck();assert.equal(reads,0);busy=false;await updater.autoCheck();assert.equal(reads,1);assert.equal(prompts,0);assert.equal(errors,0);context.subscriptions.forEach(s=>s.dispose?.());
 });
 
 test('workspace restart preserves saved multi-root and remote folders instead of silently opening the first root',()=>{
