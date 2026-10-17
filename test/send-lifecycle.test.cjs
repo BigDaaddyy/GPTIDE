@@ -16,6 +16,14 @@ function fixture() {
   Object.assign(chat, { ready: Promise.resolve(), project: process.cwd(), projectKey: 'project', activeId: 'one', chats: [record], openChatIds: ['one'], messages: record.messages, attachments: [], threadId: 'thread', resumed: true, account: { type: 'chatgpt' }, model: 'fixture', effort: 'medium', busy: false, post: () => {}, save: () => true, view: { webview: { postMessage: () => {} } }, drafts: { set: () => {} } });
   return chat;
 }
+
+test('finished turns persist elapsed work time once on their user request',()=>{
+  for(const status of ['completed','interrupted','failed']){
+    const chat=fixture(),started=Date.now()-187000;chat.messages.push({role:'user',text:'work',workStartedAt:started},{role:'assistant',text:'done'});chat.tasks=[];
+    chat.finishTurn({id:'turn',status});const request=chat.messages[0];assert.ok(request.workDurationMs>=187000&&request.workDurationMs<190000);assert.equal(request.workOutcome,status);
+    const saved=request.workDurationMs;chat.finishTurn({id:'turn',status});assert.equal(request.workDurationMs,saved);
+  }
+});
 test('explicit focus waits for view activation and never posts into a closed project',async()=>{
   const previous=vscode.commands;let finish;vscode.commands={executeCommand:method=>{assert.equal(method,'gptide.chat.focus');return new Promise(resolve=>{finish=resolve;});}};
   try{const chat=fixture();let posts=0;chat.post=()=>posts++;const pending=chat.focusInput();await new Promise(resolve=>setImmediate(resolve));assert.equal(posts,0);assert.ok(chat.focusRequestId);chat.invalidated=true;finish();await pending;assert.equal(posts,0);}

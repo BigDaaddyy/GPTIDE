@@ -112,6 +112,15 @@ function updateMessageTime(element, value) {
   element.textContent = valid ? new Intl.DateTimeFormat('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23' }).format(date) : '时间未知';
   if (valid) element.dateTime = date.toISOString(); else element.removeAttribute('datetime');
 }
+function updateWorkDuration(element, request, running) {
+  const duration = request?.workDurationMs, start = request?.workStartedAt;
+  const active = running && Number.isFinite(start) && start > 0 && duration === undefined;
+  element.hidden = !active && !(Number.isFinite(duration) && duration >= 0);
+  if (active) element.dataset.startedAt = String(start); else delete element.dataset.startedAt;
+  const seconds = Math.floor(Math.max(0, active ? Date.now() - start : duration || 0) / 1000), minutes = Math.floor(seconds / 60), hours = Math.floor(minutes / 60);
+  element.textContent = (active ? '工作中 · ' : request?.workOutcome === 'interrupted' ? '已停止 · ' : request?.workOutcome === 'failed' ? '失败 · ' : '工作了 ') + (hours ? hours + ' 小时 ' : '') + (minutes % 60 ? minutes % 60 + ' 分 ' : '') + seconds % 60 + ' 秒';
+}
+setInterval(() => { for (const element of document.querySelectorAll('.work-duration[data-started-at]')) updateWorkDuration(element, {workStartedAt:Number(element.dataset.startedAt)}, true); }, 1000);
 function renderMessages(s) {
   const chatKey = s.activeId || '__new__', switched = renderedChat !== chatKey;
   if (switched) { renderedChat = chatKey; visibleMessages = 100; messageAnchor = null; }
@@ -131,13 +140,14 @@ function renderMessages(s) {
   let newer = box.querySelector('.return-latest');
   if (end < s.messages.length && !newer) newer = make('button', 'return-latest text-button', '返回最新消息');
   if (newer) { newer.hidden = end === s.messages.length; newer.onclick = () => { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); box.scrollTop = box.scrollHeight; }; }
-  const visible = new Set(), roundEnds = []; let ending = s.messages.length - 1;
+  const visible = new Set(), roundEnds = [], roundStarts = []; let ending = s.messages.length - 1, beginning = 0;
+  for (let i = 0; i < s.messages.length; i++) { if (s.messages[i].role === 'user') beginning = i; roundStarts[i] = beginning; }
   for (let i = s.messages.length - 1; i >= 0; i--) { if (s.messages[i + 1]?.role === 'user') ending = i; roundEnds[i] = ending; }
   for (let index = start; index < end; index++) {
     const message = s.messages[index], key = message.itemId || 'message-' + index; visible.add(key);
     const signature = JSON.stringify(message); let row = messageRows.get(key);
     const roundEnd = index === s.messages.length - 1 || s.messages[index + 1].role === 'user';
-    if (row) { row.item.dataset.messageIndex = String(index); row.item.dataset.roundEnd = String(roundEnds[index]); row.role.hidden = !roundEnd; row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
+    if (row) { row.item.dataset.messageIndex = String(index); row.item.dataset.roundEnd = String(roundEnds[index]); row.role.hidden = !roundEnd; updateWorkDuration(row.duration, s.messages[roundStarts[index]], !!s.busy && index === s.messages.length - 1); row.duration.hidden ||= !roundEnd; row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
       content(row.body, message.text); updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
@@ -149,7 +159,9 @@ function renderMessages(s) {
     const hoverRound = value => { for (const candidate of messageRows.values()) if (candidate.item.dataset.roundEnd === item.dataset.roundEnd) candidate.item.classList.toggle('round-hover', value); };
     item.onmouseenter = () => hoverRound(true); item.onmouseleave = () => hoverRound(false);
     if (message.mode) role.append(make('span', 'badge', message.mode));
-    const copy = make('button', 'copy-message', '复制'); copy.onclick = () => {
+    const copy = make('button', 'copy-message'); copy.setAttribute('aria-label', '复制本轮回复');
+    const copyIcon = document.createElementNS('http://www.w3.org/2000/svg','svg'); copyIcon.setAttribute('viewBox','0 0 16 16'); copyIcon.setAttribute('aria-hidden','true'); copyIcon.innerHTML = '<rect x="5.5" y="5.5" width="8" height="8" rx="1.3"/><path d="M10.5 3.5v-1h-8v8h1"/>'; copy.append(copyIcon);
+    copy.onclick = () => {
       const last = Number(item.dataset.messageIndex); let first = last;
       if (state.messages[last]?.role !== 'user') while (first > 0 && state.messages[first - 1].role !== 'user') first--;
       post('copy', { text: state.messages.slice(first, last + 1).map(m => m.text || '').join('\n\n') });
@@ -157,9 +169,11 @@ function renderMessages(s) {
     const branch = make('button', 'branch-message', '⑂'); branch.title = '从这里创建会话分支'; branch.setAttribute('aria-label', '从这里创建会话分支'); branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked;
     branch.onclick = () => { flushDraft(); beginTabChange(); post('branch', { id: state.activeId, index: Number(item.dataset.messageIndex), revision: state.revision }); }; role.append(branch);
     const time = make('time', 'message-time'); updateMessageTime(time, message.createdAt); role.append(time);
+    const duration = make('div','work-duration'); updateWorkDuration(duration,s.messages[roundStarts[index]],!!s.busy && index === s.messages.length - 1); duration.hidden ||= !roundEnd;
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
+    item.append(duration);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    row = { item, body, signature, message, branch, time, role }; messageRows.set(key, row);
+    row = { item, body, signature, message, branch, time, role, duration }; messageRows.set(key, row);
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.

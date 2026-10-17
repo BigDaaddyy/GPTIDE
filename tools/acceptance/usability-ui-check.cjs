@@ -24,7 +24,13 @@ const env = require('../acceptance-env.cjs'), { pathToFileURL } = require('node:
     await publish({messages:[{role:'user',text:'第一轮'},{role:'assistant',text:'第一段'},{role:'assistant',text:'第二段',createdAt:'2026-10-16T10:20:30Z'},{role:'user',text:'第二轮'},{role:'assistant',text:'新的回复',createdAt:'2026-10-16T10:21:30Z'}]});
     assert.equal(await page.locator('.role:not([hidden])').count(),2);await page.locator('.copy-message:visible').first().click();assert.equal(await page.evaluate(()=>qaMessages.at(-1).text),'第一段\n\n第二段');
     await page.locator('.message').first().hover();await page.waitForTimeout(180);assert.equal(await page.locator('.message-time').nth(2).evaluate(e=>getComputedStyle(e).opacity),'1');assert.equal(await page.locator('.message-time').nth(4).evaluate(e=>getComputedStyle(e).opacity),'0');
-    await page.screenshot({path:path.join(env.artifacts,'round-actions.png')});await publish();
+    await page.screenshot({path:path.join(env.artifacts,'round-actions.png')});
+    const durationMessages=[{role:'user',text:'修改项目',workStartedAt:Date.now()-187000},{role:'assistant',text:'第一段'},{role:'assistant',text:'完成'}];
+    await publish({messages:durationMessages,busy:true});assert.equal(await page.locator('.work-duration:visible').count(),1);assert.match(await page.locator('.work-duration:visible').textContent(),/工作中 · 3 分/);
+    await publish({messages:[{...durationMessages[0],workDurationMs:187000,workOutcome:'completed'},...durationMessages.slice(1)]});
+    assert.equal(await page.locator('.work-duration:visible').count(),1);assert.equal(await page.locator('.work-duration:visible').textContent(),'工作了 3 分 7 秒');
+    assert.equal(await page.locator('.copy-message:visible').textContent(),'');assert.equal(await page.getByRole('button',{name:'复制本轮回复',exact:true}).count(),1);assert.equal(await page.locator('.copy-message:visible svg').count(),1);
+    await page.waitForTimeout(1100);assert.equal(await page.locator('.work-duration:visible').textContent(),'工作了 3 分 7 秒');await page.screenshot({path:path.join(env.artifacts,'round-duration-copy-icon.png')});await publish();
     await page.setViewportSize({width:260,height:500});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth),0);
     await page.screenshot({path:path.join(env.artifacts,'usage-260.png')});await page.setViewportSize({width:390,height:780});
     const snippet=Array.from({length:40},(_,i)=>'const 名字'+i+' = "<script>&"; // comment').join('\n');

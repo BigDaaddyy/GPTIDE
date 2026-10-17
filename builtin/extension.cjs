@@ -674,7 +674,7 @@ class Chat {
       this.baseline = mode === 'agent' ? review.snapshot(this.project) : null; this.candidates = new Map();
       const active = this.chats.find(c => c.id === this.activeId); active.tasks ||= []; this.tasks = active.tasks; active.taskTurn = (active.taskTurn || 0) + 1; this.currentTaskTurn = active.taskTurn;
       if (this.baseline?.limited) this.importWarning = '项目较大，修改预览只覆盖已采集的文本文件。';
-      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model, createdAt: Date.now() }); if (!this.save()) throw new Error(this.historyWarning); this.post();
+      this.messages.push({ role: 'user', text, attachments: labels, mode, model: this.model, createdAt: Date.now(), workStartedAt: Date.now() }); if (!this.save()) throw new Error(this.historyWarning); this.post();
       const sentChatId = this.activeId, sentThreadId = this.threadId;
       this.pendingSubmission = { epoch, ids: [...new Set([submittedChatId, sentChatId])], draftText: submittedDraftText, draftVersion: submittedDraftVersion, attachmentIds: submittedAttachmentIds, chatId: sentChatId, threadId: sentThreadId, clientSendId, queueId, clearDraft: !queueId };
       const instruction = mode === 'plan' ? '请先调查项目并给出具体实施计划、涉及文件和验证步骤。本轮只做计划，不修改文件。\n\n' : '';
@@ -756,6 +756,10 @@ class Chat {
     if (method === 'error') { if (!p.willRetry) this.finishTurn({ id: p.turnId, status: 'failed', error: p.error }); else { this.status = p.error?.message || '正在重试'; this.save(); this.post(); } }
   }
   finishTurn(turn) {
+    const request = this.messages.findLast(m => m.role === 'user');
+    if (Number.isFinite(request?.workStartedAt) && request.workStartedAt > 0 && request.workDurationMs === undefined) {
+      request.workDurationMs = Math.max(0, Date.now() - request.workStartedAt); request.workOutcome = turn.status;
+    }
     const unconfirmedQueueId = this.pendingSubmission?.queueId;
     this.finishedSendEpoch = this.sendEpoch;
     if (turn.status !== 'failed' && this.pendingSubmission?.threadId === this.threadId) this.acknowledgeSubmission(this.pendingSubmission.epoch);
