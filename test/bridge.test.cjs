@@ -10,6 +10,12 @@ test('Codex discovery resolves absolute install paths and never falls back to a 
 });
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+test('RPC rejection preserves its numeric error code for safe steering failure handling', async () => {
+  const bridge = new Bridge('unused', process.cwd()); let received;
+  bridge.pending.set(1, { timer: setTimeout(() => {}, 1000), reject: error => { received = error; } });
+  bridge.receive(JSON.stringify({ id: 1, error: { code: -32600, message: 'turn mismatch' } }));
+  assert.equal(received.code, -32600); assert.equal(received.message, 'turn mismatch');
+});
 const Module = require('node:module');
 
 function mockStartedBridge() {

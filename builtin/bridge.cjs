@@ -55,7 +55,7 @@ class Bridge extends EventEmitter {
     if (value.method !== undefined) { if (typeof value.method === 'string' && value.method) this.emit(value.id === undefined ? 'notification' : 'request', value); return; }
     const entry = this.pending.get(value.id); if (!entry) return;
     clearTimeout(entry.timer); this.pending.delete(value.id);
-    if (value.error) entry.reject(new Error(typeof value.error.message === 'string' ? value.error.message : 'Codex 请求失败')); else entry.resolve(value.result);
+    if (value.error) { const error = new Error(typeof value.error.message === 'string' ? value.error.message : 'Codex 请求失败'); if (typeof value.error.code === 'number') error.code = value.error.code; entry.reject(error); } else entry.resolve(value.result);
   }
   call(method, params = {}, timeout = this.timeout) {
     return new Promise((resolve, reject) => {

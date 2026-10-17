@@ -17,6 +17,42 @@ function fixture() {
   return chat;
 }
 
+test('running task accepts steering with the exact active turn and preserves subsequent input', async () => {
+  const chat = fixture(), calls = [], notifications = [];
+  chat.busy = true; chat.turnId = 'running'; chat.messages.push({ role: 'user', text: 'original', workStartedAt: Date.now() - 10000 });
+  chat.attachments = [{ id: 'old', label: 'a.js', text: 'context' }];
+  let complete; chat.bridge = { call: (method, params) => { calls.push({ method, params }); return new Promise(resolve => { complete = resolve; }); } };
+  chat.view.webview.postMessage = value => notifications.push(value);
+  const pending = chat.steer('follow-up', 'client'); await Promise.resolve();
+  assert.equal(calls[0].method, 'turn/steer'); assert.equal(calls[0].params.expectedTurnId, 'running'); assert.match(calls[0].params.input[0].text, /context/);
+  await assert.rejects(chat.steer('duplicate'), /当前状态/); assert.equal(calls.length, 1);
+  chat.chats[0].draft = 'next draft'; chat.chats[0].draftVersion = 2; chat.attachments.push({ id: 'new', label: 'b.js', text: 'later' });
+  complete({ turnId: 'running' }); await pending;
+  assert.equal(chat.busy, true); assert.equal(chat.chats[0].draft, 'next draft'); assert.deepEqual(chat.attachments.map(a => a.id), ['new']);
+  assert.equal(chat.messages.at(-1).text, 'follow-up'); assert.equal(notifications.at(-1).clientSendId, 'client'); assert.equal(chat.steerBusy, false);
+  chat.tasks = []; chat.finishTurn({ id: 'running', status: 'completed' });
+  assert.equal(chat.messages[0].workDurationMs, chat.messages[1].workDurationMs);
+});
+test('steering rejects unavailable turns, preserves drafts on failures and never retries unknown delivery', async () => {
+  const chat = fixture(); await assert.rejects(chat.steer('follow-up'), /任务尚未/);
+  chat.busy = true; chat.turnId = 'running'; let calls = 0;
+  chat.bridge = { call: async () => { calls++; throw Object.assign(Error('turn mismatch'), { code: -32600 }); } };
+  await assert.rejects(chat.steer('follow-up'), /追加失败/); assert.equal(chat.messages.length, 0); assert.equal(chat.chats[0].draft, 'submitted');
+  chat.bridge = { call: async () => { calls++; throw Error('timeout'); } };
+  await assert.rejects(chat.steer('follow-up'), /追加结果未确认/); assert.equal(chat.messages.at(-1).delivery, 'unknown'); assert.equal(calls, 2); assert.equal(chat.steerBusy, false);
+  chat.save = () => false;
+  await assert.rejects(chat.steer('unsaved'), /保存失败/); assert.equal(calls, 2); assert.equal(chat.messages.length, 1);
+});
+test('accepted steering clears only its unchanged draft and closed projects discard late acknowledgments', async () => {
+  const chat = fixture(), cleared = [], notifications = []; chat.busy = true; chat.turnId = 'running';
+  chat.persistDraft = (id, text) => { cleared.push({ id, text }); }; chat.view.webview.postMessage = value => notifications.push(value);
+  chat.bridge = { call: async () => ({ turnId:'running' }) };
+  await chat.steer('submitted', 'accepted'); assert.deepEqual(cleared,[{id:'one',text:''}]); assert.equal(notifications.length,1);
+  let complete; chat.bridge = { call: () => new Promise(resolve => { complete=resolve; }) };
+  const pending = chat.steer('late', 'closed'); await Promise.resolve(); chat.invalidated=true; complete({turnId:'running'}); await pending;
+  assert.equal(notifications.length,1); assert.equal(cleared.length,1); assert.equal(chat.steerBusy,false);
+});
+
 test('finished turns persist elapsed work time once on their user request',()=>{
   for(const status of ['completed','interrupted','failed']){
     const chat=fixture(),started=Date.now()-187000;chat.messages.push({role:'user',text:'work',workStartedAt:started},{role:'assistant',text:'done'});chat.tasks=[];

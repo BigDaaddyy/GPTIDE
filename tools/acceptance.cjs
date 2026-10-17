@@ -1,6 +1,7 @@
 const fs = require('node:fs'), path = require('node:path'), { execFile } = require('node:child_process'), { promisify } = require('node:util');
 const root = path.resolve(__dirname, '..'), output = path.join(root, 'downloads', 'acceptance', Date.now() + '-' + process.pid); fs.mkdirSync(output, { recursive: true });
 const scenarios = [
+  ['chat-interactions', 'chat-interactions-ui-check.cjs', [], 'web'],
   ['messages', 'find-task-ui-check.cjs', [], 'web'], ['usability', 'usability-ui-check.cjs', [], 'web'],
   ['settings-usability', 'settings-usability-ui-check.cjs', [], 'web'],
   ['home', 'home-check.cjs'], ['offline', 'offline-check.cjs'], ['sidebar', 'sidebar-check.cjs'],

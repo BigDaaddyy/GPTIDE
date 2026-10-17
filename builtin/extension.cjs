@@ -233,6 +233,37 @@ class Chat {
     this.view?.webview.postMessage({ type: 'tabChangePending', projectKey: this.projectKey });
     this.chats.unshift(chat); this.select(chat.id); this.status = '已创建分支 · 首次发送时建立独立会话'; this.save(); this.post(); return true;
   }
+  async steer(text, clientSendId) {
+    await this.ready;
+    if (this.invalidated || !vscode.workspace.isTrusted || this.storageBlocked || this.reviewBusy || this.inlineBusy || this.inlinePromptBusy || this.loginPending || this.steerBusy) throw Error('当前状态不能追加指令');
+    if (!this.busy || !this.turnId || !this.bridge) throw Error('任务尚未开始或已结束，请发送新消息或加入队列');
+    if (typeof text !== 'string' || !text.trim() || text.length > 100000) throw Error('追加指令不能为空或超过 10 万字符');
+    const chat = this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey);
+    if (!chat || chat.source === 'cursor') throw Error('当前对话不能追加指令');
+    const bridge = this.bridge, threadId = this.threadId, turnId = this.turnId, draft = chat.draft, draftVersion = chat.draftVersion || 0;
+    const attachments = [...this.attachments], request = this.messages.findLast(m => m.role === 'user');
+    const message = { role: 'user', text: text.trim(), createdAt: Date.now(), steering: true, workStartedAt: request?.workStartedAt || Date.now(), attachments: attachments.map(a => a.label) };
+    let input = message.text, budget = 100000;
+    for (const attachment of attachments) { const snippet = attachment.text.slice(0, Math.min(50000, budget)); budget -= snippet.length; input += `\n\n引用：${attachment.label}\n${snippet}`; if (budget <= 0) break; }
+    this.steerBusy = true; this.messages.push(message);
+    try {
+      if (!this.save()) { this.messages.splice(this.messages.indexOf(message), 1); throw Error(this.historyWarning || '追加指令保存失败'); }
+      this.post();
+      try { await bridge.call('turn/steer', { threadId, expectedTurnId: turnId, input: [{ type: 'text', text: input }] }); }
+      catch (error) {
+        if (this.invalidated || this.activeId !== chat.id || this.bridge !== bridge) throw error;
+        if (typeof error.code === 'number') { const index = chat.messages.indexOf(message); if (index >= 0) chat.messages.splice(index, 1); }
+        else message.delivery = 'unknown';
+        this.save();
+        throw Error(typeof error.code === 'number' ? `追加失败：${error.message}` : '追加结果未确认，请检查对话后再决定是否重发');
+      }
+      if (this.invalidated || this.activeId !== chat.id || this.bridge !== bridge) return;
+      if (chat.draft === draft && (chat.draftVersion || 0) === draftVersion) this.persistDraft(chat.id, '');
+      const ids = new Set(attachments.map(a => a.id)); this.attachments = this.attachments.filter(a => !ids.has(a.id));
+      this.view?.webview.postMessage({ type: 'sent', projectKey: this.projectKey, id: chat.id, clientSendId });
+      this.steerBusy = false; this.save(); this.post();
+    } finally { this.steerBusy = false; }
+  }
   async enqueue(text, mode, clientSendId) {
     await this.ready;
     const chat = this.chats.find(value => value.id === this.activeId && value.projectKey === this.projectKey);
@@ -321,7 +352,7 @@ class Chat {
     this.streamUpdates?.clear();
     this.settingsRefresh?.();
     const chat = this.loadingScope ? null : this.chats.find(c => c.id === this.activeId && c.projectKey === this.projectKey); const visible = this.loadingScope ? [] : this.chats.filter(c => c.projectKey === this.projectKey);
-    this.view?.webview.postMessage({ type: 'state', usage: this.usageSnapshot?.(), revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), focusRequestId: this.focusRequestId, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, canCancelLogin: !!this.loginSession?.id && !this.loginSession.done && !this.loginSession.completing && !this.loginSession.canceling, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], modelChoices:require("./model-catalog.cjs").choices(this.models||[]), serviceTier:this.serviceTier||"default", ...this.approvalSettings(), model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, ...(c.statsVersion===1?{added:c.added,removed:c.removed,approximate:!!c.approximate}:require('./diff-stats.cjs').stats(c.before,c.after)) })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
+    this.view?.webview.postMessage({ type: 'state', usage: this.usageSnapshot?.(), revision: this.streamRevision, projectKey: this.projectKey, project: this.project || '', status: this.status, warning: [this.historyWarning, this.scopeWarning, this.importWarning, this.draftWarning, this.reviewWarning, this.contextWarning].filter(Boolean).join('；'), busy: this.busy || this.loadingScope, canSteer: !!(this.busy && this.turnId && this.bridge && !this.steerBusy), loadingScope: this.loadingScope, storageBlocked: !!this.storageBlocked, connected: !!this.bridge && !this.connecting && !this.loginPending && ['chatgpt', 'chatgptAuthTokens'].includes(this.account?.type), focusRequestId: this.focusRequestId, operationLocked: this.actionLocked(), loginPending: !!this.loginPending, canCancelLogin: !!this.loginSession?.id && !this.loginSession.done && !this.loginSession.completing && !this.loginSession.canceling, reviewBusy: this.reviewBusy, inlineBusy: !!(this.inlineBusy || this.inlinePromptBusy), checkpoints: this.loadingScope ? [] : (chat?.checkpoints || []).filter(c => c.projectKey === this.projectKey).map(c => ({ id: c.id, turn: c.turn, createdAt: c.createdAt, count: c.changes.length, limited: c.limited, legacy: c.legacy })), activeCheckpointId: this.activeCheckpointId, preferences: preferences.values(vscode.workspace.getConfiguration("gptide")), messages: this.loadingScope ? [] : this.messages, activeId: this.loadingScope ? null : this.activeId, source: chat?.source, branch: chat?.branch || null, queue: (chat?.queue || []).map(({id,text,mode,status,error}) => ({id,text,mode,status,error})), queuePaused: !!chat?.queuePaused, lastOutcome: chat?.lastOutcome, canRestore: !!chat?.lastRequest, draft: chat?.draft || '', draftUpdatedAt: chat?.draftUpdatedAt || 0, history: history.entries(visible, this.activeId), openChatIds: this.loadingScope ? [] : this.openChatIds, chats: visible.map(c => ({ id: c.id, name: c.name, source: c.source, updatedAt: c.updatedAt, count: c.messages.length })), models: this.models || [], modelChoices:require("./model-catalog.cjs").choices(this.models||[]), serviceTier:this.serviceTier||"default", ...this.approvalSettings(), model: this.model, effort: this.effort, mode: this.mode, tasks: this.loadingScope ? [] : this.tasks || [], pinnedContext: this.loadingScope ? [] : (this.fixedContext?.labels() || []), attachments: this.attachments.map(({ id, label }) => ({ id, label })), changes: (this.changes || []).map(c => ({ path: c.path, relative: c.relative, status: c.status, ...(c.statsVersion===1?{added:c.added,removed:c.removed,approximate:!!c.approximate}:require('./diff-stats.cjs').stats(c.before,c.after)) })), account: this.account, activity: this.activity || '', cursorCount: this.cursorCount || 0 });
   }
   postStream() {
     if (this.invalidated) return;
@@ -758,7 +789,9 @@ class Chat {
   finishTurn(turn) {
     const request = this.messages.findLast(m => m.role === 'user');
     if (Number.isFinite(request?.workStartedAt) && request.workStartedAt > 0 && request.workDurationMs === undefined) {
-      request.workDurationMs = Math.max(0, Date.now() - request.workStartedAt); request.workOutcome = turn.status;
+      for (const message of this.messages) if (message.role === 'user' && message.workStartedAt === request.workStartedAt && message.workDurationMs === undefined) {
+        message.workDurationMs = Math.max(0, Date.now() - request.workStartedAt); message.workOutcome = turn.status;
+      }
     }
     const unconfirmedQueueId = this.pendingSubmission?.queueId;
     this.finishedSendEpoch = this.sendEpoch;
@@ -798,6 +831,7 @@ class Chat {
         if (msg.type === 'reconnect') await this.reconnect();
         if (msg.type === 'restoreRequest') await this.restoreRequest(msg.id, msg.revision, msg.editVersion);
         if (msg.type === 'send') await this.send(msg.text, msg.mode, msg.attach, typeof msg.clientSendId === 'string' && msg.clientSendId.length <= 160 ? msg.clientSendId : undefined);
+        if (msg.type === 'steer') await this.steer(msg.text, msg.clientSendId);
         if (msg.type === 'enqueue') await this.enqueue(msg.text, msg.mode, msg.clientSendId);
         if (['queuePause', 'queueEdit', 'queueRemove', 'queueMove', 'queueRetry'].includes(msg.type)) await this.queueAction(msg.type, msg.id, msg.direction);
         if (msg.type === 'stop' && this.busy) { const chat = this.chats.find(value => value.id === this.activeId); if (chat) chat.queuePaused = true; this.cancelPendingSend = true; this.status = '正在停止'; this.post(); if (this.turnId && this.bridge) await this.bridge.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }); else if (!this.bridge) this.pendingBridge?.dispose(); }
@@ -838,7 +872,7 @@ class Chat {
         if (msg.type === 'folder') await vscode.commands.executeCommand('workbench.action.files.openFolder');
         if (msg.type === 'changes') await vscode.commands.executeCommand('workbench.view.scm');
         if (msg.type === 'terminal') await vscode.commands.executeCommand('workbench.action.terminal.toggleTerminal');
-      } catch (e) { this.status = e.message; this.post(); if (["send", "enqueue"].includes(msg.type)) this.view?.webview.postMessage({ type: "sendRejected", projectKey: this.projectKey, clientSendId: msg.clientSendId }); }
+      } catch (e) { this.status = e.message; this.post(); if (["send", "enqueue", "steer"].includes(msg.type)) this.view?.webview.postMessage({ type: "sendRejected", projectKey: this.projectKey, clientSendId: msg.clientSendId }); }
     });
     this.post();
   }

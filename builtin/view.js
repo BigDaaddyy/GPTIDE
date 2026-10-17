@@ -36,14 +36,15 @@ const findCache = new Map();
 let quickRows = [], quickIndex = 0, quickSignature = '', quickDismissed;
 const post = (type, data = {}) => { if (!invalidated) api.postMessage({ type, projectKey, ...data }); };
 const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-function inline(node, text) {
+function inline(node, text, depth = 0) {
   // Model HTML always remains literal text; never use innerHTML.
-  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g; let end = 0;
+  if (depth > 6) { node.append(document.createTextNode(text)); return; }
+  const pattern = /(`[^`\n]+`|\*\*(?=\S)[^\n]+?\*\*|__(?=\S)[^\n]+?__|~~(?=\S)[^\n]+?~~|\*(?=\S)[^*\n]+?\*|(?<![A-Za-z0-9])_(?=\S)[^_\n]+?_(?![A-Za-z0-9])|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g; let end = 0;
   for (const match of text.matchAll(pattern)) {
     node.append(document.createTextNode(text.slice(end, match.index))); const value = match[0];
     if (value.startsWith('`')) node.append(make('code', '', value.slice(1, -1)));
-    else if (value.startsWith('**')) node.append(make('strong', '', value.slice(2, -2)));
-    else { const link = value.match(/^\[([^\]]+)\]\((.+)\)$/); const button = make('button', 'link', link[1]); button.onclick = () => post('openLink', { url: link[2] }); node.append(button); }
+    else if (value.startsWith('[')) { const link = value.match(/^\[([^\]]+)\]\((.+)\)$/); const button = make('button', 'link'); inline(button, link[1], depth + 1); button.onclick = () => post('openLink', { url: link[2] }); node.append(button); }
+    else { const double = ['**','__','~~'].includes(value.slice(0,2)), element = make(value.startsWith('~~') ? 'del' : double ? 'strong' : 'em'); inline(element, value.slice(double ? 2 : 1, double ? -2 : -1), depth + 1); node.append(element); }
     end = match.index + value.length;
   }
   node.append(document.createTextNode(text.slice(end)));
@@ -150,7 +151,7 @@ function renderMessages(s) {
     if (row) { row.item.dataset.messageIndex = String(index); row.item.dataset.roundEnd = String(roundEnds[index]); row.role.hidden = !roundEnd; updateWorkDuration(row.duration, s.messages[roundStarts[index]], !!s.busy && index === s.messages.length - 1); row.duration.hidden ||= !roundEnd; row.branch.disabled = s.operationLocked || s.busy || s.reviewBusy || s.storageBlocked; }
     if (row && row.signature === signature) continue;
     if (row) {
-      content(row.body, message.text); updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
+      content(row.body, message.text); row.delivery.hidden = message.delivery !== 'unknown'; updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
     }
     const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GPTIDE');
     role.hidden = !roundEnd;
@@ -171,9 +172,10 @@ function renderMessages(s) {
     const time = make('time', 'message-time'); updateMessageTime(time, message.createdAt); role.append(time);
     const duration = make('div','work-duration'); updateWorkDuration(duration,s.messages[roundStarts[index]],!!s.busy && index === s.messages.length - 1); duration.hidden ||= !roundEnd;
     const body = make('div', 'content'); content(body, message.text); item.append(role, body);
+    const delivery = make('div', 'delivery-warning', '追加结果未确认'); delivery.hidden = message.delivery !== 'unknown'; item.append(delivery);
     item.append(duration);
     if (message.attachments?.length) { const files = make('div', 'message-files'); for (const label of message.attachments) files.append(make('span', 'file-chip', label)); item.append(files); }
-    row = { item, body, signature, message, branch, time, role, duration }; messageRows.set(key, row);
+    row = { item, body, signature, message, branch, time, role, duration, delivery }; messageRows.set(key, row);
   }
   for (const [key, row] of messageRows) if (!visible.has(key)) { row.item.remove(); messageRows.delete(key); }
   // Reconcile order without detaching stable rows during token streaming.
@@ -293,11 +295,9 @@ function render(s) {
   el('login-state').hidden = !s.loginPending; el('cancel-login').disabled = !s.canCancelLogin;
   el('activity').hidden = !s.busy; el('activity-text').textContent = s.activity || '正在思考…';
   el('warning').textContent = s.warning || ''; el('warning').hidden = !s.warning;
-  el('send').textContent = s.busy ? '■' : '↑'; el('send').title = s.busy ? '停止生成' : '发送消息';
 for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'folder', 'attach', 'attachCurrent']) el(id).disabled = s.operationLocked || s.busy || s.reviewBusy;
   for (const id of ['new', 'rename', 'delete']) el(id).disabled ||= !!s.storageBlocked;
   syncSend();
-  el('send').setAttribute('aria-label', s.busy ? '停止生成' : '发送消息');
   el('recovery').hidden = s.busy || s.inlineBusy || !['failed', 'interrupted', 'unknown'].includes(s.lastOutcome);
   el('recovery-label').textContent = s.lastOutcome === 'unknown' ? '上次结果未确认' : s.lastOutcome === 'interrupted' ? '任务已停止' : '任务未完成';
   el('restore-request').disabled = !s.canRestore || !!el('input').value.trim() || s.storageBlocked; el('restore-request').title = '只取回草稿，不发送；当前草稿需为空';
@@ -386,7 +386,16 @@ function performQuickAction(action, remainder, query) {
   else { flushDraft(); if (action.action === 'new') beginTabChange(); post(action.action); }
   if (!pendingTabChange) input.focus();
 }
-function syncSend(){el('send').disabled=!!state.loginPending||!!state.inlineBusy||!!state.reviewBusy||!!state.storageBlocked||!!state.loadingScope||pendingTabChange||(pendingSend&&!pendingQueue)||(!state.busy&&!el('input').value.trim());}
+function syncSend(){
+  const text = !!el('input').value.trim(), append = state.busy && text;
+  el('send').textContent = state.busy && !text ? '■' : '↑';
+  el('send').title = append ? state.canSteer ? '追加到当前任务' : '加入队列' : state.busy ? '停止生成' : '发送消息'; el('send').setAttribute('aria-label', el('send').title);
+  el('input').placeholder = state.busy ? state.canSteer ? '追加指令，Enter 发送 · Alt+Enter 排队' : '任务准备中，可先加入队列' : '输入指令，/ 操作，@ 引用';
+  el('stop').hidden = !append; el('stop').disabled = !state.busy || !!state.loadingScope;
+  el('enqueue').disabled = pendingSend || !text || !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked;
+  el('send').disabled=!!state.loginPending||!!state.inlineBusy||!!state.reviewBusy||!!state.storageBlocked||!!state.loadingScope||pendingTabChange||(pendingSend&&!pendingQueue)||(!state.busy&&!text);
+}
+function jumpToLatest() { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); const box = el('messages'); box.scrollTop = box.scrollHeight; el('scroll-bottom').hidden = true; }
 function resizeInput() { syncSend();el('restore-request').disabled = !!el('input').value.trim() || !state.canRestore || !!state.storageBlocked; el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
 function flushDraft() { clearTimeout(draftTimer); if (draftKey === undefined || draftKey === '__new__' || invalidated) return; post('draft', { id: draftKey, text: el('input').value, sequence: ++draftSequence }); }
 function beginTabChange() { pendingTabChange = true; el('input').disabled = true;syncSend(); }
@@ -414,6 +423,7 @@ window.addEventListener('message', event => {
     if (data.id === draftKey && data.sequence === draftSequence) el('draft-state').textContent = data.saved ? el('input').value ? '草稿已保存' : '' : '草稿未保存';
   }
   if (['sent','queued'].includes(data.type) && (data.clientSendId === undefined || data.clientSendId === submittedSendId)) {
+    if (!data.id || data.id === state.activeId) jumpToLatest();
     if ((!data.id || data.id === draftKey) && inputRevision === submittedInputRevision && el('input').value === submittedDraft) el('input').value = '';
     pendingSend = false; pendingQueue = false; el('enqueue').disabled = !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked; submittedDraft = undefined; submittedSendId = undefined; submittedInputRevision = undefined; syncSend(); resizeInput(); flushDraft();
   }
@@ -431,20 +441,22 @@ el('input').onkeydown = e => {
     if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); performQuickAction(quickRows[quickIndex], undefined, actionQuery(el('input').value, el('input').selectionStart, el('input').selectionEnd)); return; }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuickActions(true); return; }
   }
+  if (e.key === 'Enter' && e.altKey && !e.shiftKey && state.busy) { e.preventDefault(); el('enqueue').click(); return; }
   const sendKey = state.preferences?.submitKey === 'ctrlEnter' ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey;
-  if (e.key === 'Enter' && sendKey && !e.shiftKey) { e.preventDefault(); if (state.busy) el('enqueue').click(); else el('send').click(); }
+  if (e.key === 'Enter' && sendKey && !e.shiftKey) { e.preventDefault(); if (state.busy && (e.altKey || !state.canSteer)) el('enqueue').click(); else el('send').click(); }
 };
 el('send').onclick = () => {
-  if (state.busy) { post('stop'); return; } if (pendingSend) return;
-  const parsed = commandAction(el('input').value);
+  if (state.busy && !el('input').value.trim()) { post('stop'); return; } if (pendingSend) return;
+  const parsed = !state.busy && commandAction(el('input').value);
   if (parsed && matchingActions({ kind: 'command', query: parsed.action.id }, state).some(action => action.id === parsed.action.id)) { performQuickAction(parsed.action, parsed.remainder); if (!parsed.action.mode || !el('input').value.trim()) return; }
-  const text = el('input').value.trim(); if (text) { flushDraft(); closeQuickActions(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('send', { text, mode: el('mode').value, clientSendId: submittedSendId }); }
+  const text = el('input').value.trim(); if (text) { flushDraft(); closeQuickActions(); jumpToLatest(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post(state.busy ? state.canSteer ? 'steer' : 'enqueue' : 'send', { text, mode: el('mode').value, clientSendId: submittedSendId }); }
 };
 el('enqueue').onclick = () => {
   if (pendingSend || !state.busy || state.loadingScope || state.storageBlocked || state.source === 'cursor') return;
   const text = el('input').value.trim(); if (!text) return;
-  flushDraft(); closeQuickActions(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
+  flushDraft(); closeQuickActions(); jumpToLatest(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
 };
+el('stop').onclick = () => post('stop');
 el('queue-pause').onclick = () => post('queuePause');
 el('cancel-login').onclick = () => post('cancelLogin');
 el('restore-request').onclick = () => { flushDraft(); post('restoreRequest', { id: state.activeId, revision: state.revision, editVersion: inputRevision }); };

@@ -110,3 +110,20 @@ body{background:var(--surface)}
 @media(max-width:320px){.composer-controls{gap:2px}#mode{flex-basis:48px}#model-toggle{padding-inline:2px;gap:2px}#approval-toggle{padding-inline:3px;font-size:10px}#approval-toggle>svg{display:none}.send{margin-left:0}}
 
 .mode-picker{position:relative;display:inline-flex;align-items:center;flex:0 0 auto;color:var(--muted)}.mode-picker>svg{position:absolute;right:5px;pointer-events:none}.composer-controls #mode{appearance:none;-webkit-appearance:none;flex:none;width:auto;height:25px;padding:3px 17px 3px 5px;border-radius:5px;font:11px var(--vscode-font-family);color:var(--muted)}#model-toggle,#approval-toggle{height:25px;border-radius:5px}#model-toggle>span[aria-hidden]{flex-shrink:0}#mode,#model-toggle,#approval-toggle{transition:background .14s ease,color .14s ease,transform .14s ease}#mode:hover:not(:disabled),#model-toggle:hover:not(:disabled),#approval-toggle:hover:not(:disabled){background:color-mix(in srgb,currentColor 9%,transparent);color:var(--vscode-foreground);transform:translateY(-1px)}#mode:active:not(:disabled),#model-toggle:active:not(:disabled),#approval-toggle:active:not(:disabled){transform:translateY(0)}#attach{margin-left:auto}@media(max-width:320px){.composer-controls #mode{font-size:10px;padding-left:3px;padding-right:14px}.mode-picker>svg{right:3px}#model-toggle{max-width:130px}}
+
+/* Task details must scroll inside their own bounds, above review and composer. */
+.task-panel{overflow:auto;flex:0 1 auto;min-height:28px;max-height:20dvh;isolation:isolate;scrollbar-width:thin;background:var(--surface)}
+.task-panel>summary{position:sticky;top:0;z-index:1;background:var(--surface)}
+.task-panel .task-list{max-height:none;overflow:visible}
+.task-panel .task-output{max-height:140px;overflow:auto}
+.task-panel .task-controls{flex-wrap:wrap}
+#enqueue{width:auto;flex:0 0 auto;padding:0 4px;font-size:10px;white-space:nowrap;color:var(--muted)}
+#stop{flex:0 0 22px;width:22px;height:25px;padding:0;color:var(--vscode-foreground)}
+.content strong{font-weight:650;color:var(--vscode-textLink-foreground,#4756b8)}
+.content em{font-style:italic}.content del{color:var(--muted)}
+.content :not(pre)>code{color:var(--vscode-textPreformat-foreground,#9b3b57);background:var(--vscode-textCodeBlock-background,#f0f1f5);border:1px solid var(--border);padding:1px 4px;border-radius:4px;font-size:.92em}
+.content h1,.content h2,.content h3{font-weight:650;line-height:1.4;letter-spacing:-.015em}
+.content li{margin:5px 0}.content p{line-height:1.75}
+.delivery-warning{font-size:11px;color:var(--vscode-editorWarning-foreground,#946200);margin-top:4px}
+body.vscode-high-contrast .content strong,body.vscode-high-contrast-light .content strong{color:inherit}
+@media(max-height:600px){.task-panel{max-height:16dvh}}
