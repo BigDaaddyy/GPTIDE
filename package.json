@@ -7,6 +7,7 @@
     "start": "node tools/launch.cjs",
     "test": "node --test test/*.test.cjs",
     "check": "node tools/check.cjs",
+    "check:privacy": "node tools/check-privacy.cjs",
     "acceptance": "node tools/acceptance.cjs",
     "verify:runtime": "node tools/verify-runtime.cjs",
     "package": "node tools/package.cjs"

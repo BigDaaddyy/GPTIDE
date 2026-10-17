@@ -6,3 +6,24 @@ runtime/
 test/smoke-result.txt
 example-project/test/smoke-result.txt
 *.log
+
+# Local development records and screenshots are not public source.
+OPERATION_LOG.md
+preview.png
+.codex/
+.cursor/
+.gptide/
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+**/auth.json
+**/usage.json
+**/state.vscdb*
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
