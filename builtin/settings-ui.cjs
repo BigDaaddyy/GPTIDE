@@ -62,6 +62,7 @@ function install(vscode, context, root, currentChat) {
         }
         if (message.type === 'advanced') return vscode.commands.executeCommand('workbench.action.openSettings', '@ext:gptide.gptide-chat');
         if (message.type === 'usage') return vscode.commands.executeCommand('gptide.usage');
+        if (message.type === 'updates') return vscode.commands.executeCommand('gptide.checkForUpdates');
         if (message.type === 'diagnostics') return vscode.commands.executeCommand('gptide.diagnostics');
         if (message.type !== 'config') return;
       const file = path.join(codexHome(), 'config.toml');

@@ -28,9 +28,9 @@ for (const name of fs.readdirSync(path.join(root,'app'))) {
   copy(path.join(root,'app',name),path.join(payload,'app',name));
 }
 copy(path.join(root,'runtime/node.exe'),path.join(payload,'runtime/node.exe'));
-for(const name of ['launch.cjs','cursor-import.cjs'])copy(path.join(root,'tools',name),path.join(payload,'tools',name));
+for(const name of ['launch.cjs','cursor-import.cjs','update-core.cjs','update-worker.cjs'])copy(path.join(root,'tools',name),path.join(payload,'tools',name));
 for (const name of ['icon.ico','icon.png','logo.svg']) copy(path.join(root,'assets',name),path.join(payload,'assets',name));
-for (const name of ['启动GPTIDE.cmd','README.md','CHANGELOG.md','package.json']) copy(path.join(root,name),path.join(payload,name));
+for (const name of ['启动GPTIDE.cmd','README.md','CHANGELOG.md','UPDATES.md','package.json']) copy(path.join(root,name),path.join(payload,name));
 const defaults = path.join(output,'defaults'); fs.mkdirSync(defaults,{recursive:true});
 fs.writeFileSync(path.join(defaults,'settings.json'),JSON.stringify(require('./defaults.cjs').settings,null,2));
 fs.writeFileSync(path.join(defaults,'keybindings.json'),JSON.stringify(require('./defaults.cjs').keybindings,null,2));
@@ -41,9 +41,18 @@ const inventory = files(payload).map(name => {
 fs.writeFileSync(path.join(output,'payload-manifest.json'),JSON.stringify({version,files:inventory},null,2));
 }
 const defaults=path.join(output,'defaults');
-if(compileOnly){const manifest=JSON.parse(fs.readFileSync(path.join(output,'payload-manifest.json'),'utf8'));if(manifest.version!==version)throw Error('版本不匹配');if(JSON.stringify(files(payload).sort())!==JSON.stringify(manifest.files.map(x=>x.name).sort()))throw Error('暂存文件清单已改变');for(const entry of manifest.files){const bytes=fs.readFileSync(path.join(payload,entry.name));if(crypto.createHash('sha256').update(bytes).digest('hex')!==entry.sha256)throw Error('暂存文件已改变：'+entry.name);}}
+if(compileOnly){const manifest=JSON.parse(fs.readFileSync(path.join(output,'payload-manifest.json'),'utf8'));if(manifest.version!==version)throw Error('版本不匹配');if(JSON.stringify(files(payload).filter(n=>n!=='gptide-release.json').sort())!==JSON.stringify(manifest.files.map(x=>x.name).sort()))throw Error('暂存文件清单已改变');for(const entry of manifest.files){const bytes=fs.readFileSync(path.join(payload,entry.name));if(crypto.createHash('sha256').update(bytes).digest('hex')!==entry.sha256)throw Error('暂存文件已改变：'+entry.name);}}
+(async()=>{
+if(!compileOnly){
+  let bases=process.env.GPTIDE_UPDATE_BASES?JSON.parse(process.env.GPTIDE_UPDATE_BASES):process.env.GPTIDE_UPDATE_BASE;
+  if(bases===undefined){const releaseRoot=path.dirname(output);bases=fs.readdirSync(releaseRoot).filter(name=>/^\d+\.\d+\.\d+$/.test(name)&&require('../builtin/updates.cjs').newer(version,name)).sort((a,b)=>require('../builtin/updates.cjs').newer(a,b)?-1:1).map(name=>path.join(releaseRoot,name,'update-manifest.json')).filter(file=>fs.existsSync(file)).slice(0,3);}
+  if(bases&&typeof bases!=='string'&&(!Array.isArray(bases)||bases.some(file=>typeof file!=='string')))throw Error('增量基线必须为路径或路径数组');
+  await require('./update-build.cjs').build(output,bases);
+}
+else {const installed=JSON.parse(fs.readFileSync(path.join(payload,'gptide-release.json'))),expected=JSON.parse(fs.readFileSync(path.join(output,'payload-manifest.json')));if(JSON.stringify(installed)!==JSON.stringify({schema:1,version:expected.version,files:expected.files}))throw Error('安装更新清单已改变');}
 const installer = path.join(output,`GPTIDE-Setup-${version}-x64.exe`);
 execFileSync(makensis,['/V2',`/DVERSION=${version}`,`/DSOURCE=${root}`,`/DPAYLOAD=${payload}`,`/DDEFAULTS=${defaults}`,`/DOUTPUT=${installer}`,path.join(root,'tools/installer.nsi')],{stdio:'inherit',windowsHide:true});
 const digest = crypto.createHash('sha256').update(fs.readFileSync(installer)).digest('hex');
 fs.writeFileSync(path.join(output,'SHA256SUMS.txt'),`${digest}  ${path.basename(installer)}\n`);
 console.log(JSON.stringify({installer,bytes:fs.statSync(installer).size,files:files(payload).length,sha256:digest}));
+})().catch(error=>{console.error(error.message);process.exitCode=1;});
