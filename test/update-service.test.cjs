@@ -12,3 +12,18 @@ test('check-update command downloads and verifies fixture delta, leaves installa
   const vscode={StatusBarAlignment:{Right:1},ProgressLocation:{Notification:1},window:{createStatusBarItem:()=>({show(){},dispose(){}}),withProgress:async(options,task)=>task({report(){}},{onCancellationRequested:()=>({dispose(){}})}),showInformationMessage:async(message,...options)=>{messages.push(message);return options[0]==='下载更新'?'下载更新':undefined;},showErrorMessage:async message=>errors.push(message)},commands:{registerCommand:(name,run)=>{commands.set(name,run);return {dispose(){}};}}};
   service.install(vscode,context,root);await commands.get('gptide.checkForUpdates')();assert.equal(downloads,2);assert.deepEqual(errors,[]);assert.ok(messages.some(m=>m.includes('更新已准备好')));core.verify(root,base.files);assert.equal(fs.existsSync(path.join(root,'.gptide-update')),false);assert.deepEqual(fs.readdirSync(path.join(data,'updates')),[]);context.subscriptions.forEach(s=>s.dispose?.());
 });
+
+test('workspace restart preserves saved multi-root and remote folders instead of silently opening the first root',()=>{
+  const locations={data:'C:/data',extensions:'C:/extensions'},workspaceFile={scheme:'file',fsPath:'C:/work/team.code-workspace'},workspaceFolders=[{uri:{scheme:'file',fsPath:'C:/one'}},{uri:{scheme:'file',fsPath:'C:/two'}}];
+  const saved=service.restartArgs({workspaceFile,workspaceFolders},locations);assert.equal(saved.at(-1),workspaceFile.fsPath);assert.equal(saved.includes('C:/one'),false);
+  const folders=service.restartArgs({workspaceFolders},locations);assert.deepEqual(folders.slice(-2),['C:/one','C:/two']);
+  assert.throws(()=>service.restartArgs({workspaceFile:{scheme:'untitled'}},locations),/保存当前工作区/);
+  assert.deepEqual(service.restartArgs({workspaceFolders:[{uri:{scheme:'vscode-remote',toString:()=> 'vscode-remote://ssh-remote+dev/project'}}]},locations).slice(-2),['--folder-uri','vscode-remote://ssh-remote+dev/project']);
+});
+
+test('an interrupted transaction offers offline recovery before network or baseline verification',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-recovery-ui-'));t.after(()=>core.removeTree(path.dirname(dir),path.basename(dir)));fs.mkdirSync(path.join(dir,'tools'));fs.copyFileSync(path.resolve(__dirname,'../tools/update-core.cjs'),path.join(dir,'tools/update-core.cjs'));fs.mkdirSync(path.join(dir,'.gptide-update'));fs.writeFileSync(path.join(dir,'.gptide-update/journal.json'),JSON.stringify({schema:1,entries:[]}));
+  const old=network.json;let reads=0;network.json=async()=>{reads++;throw Error('must not reach network');};t.after(()=>{network.json=old;});const commands=new Map(),messages=[],context={subscriptions:[],globalState:{get:()=>undefined}};
+  const vscode={StatusBarAlignment:{Right:1},window:{createStatusBarItem:()=>({show(){},dispose(){}}),showInformationMessage:async message=>{messages.push(message);},showErrorMessage:async message=>{throw Error(message);}},commands:{registerCommand:(id,callback)=>{commands.set(id,callback);return {dispose(){}};}}};
+  service.install(vscode,context,dir);await commands.get('gptide.checkForUpdates')();assert.equal(reads,0);assert.ok(messages.some(m=>m.includes('上次更新未完成')));assert.ok(fs.existsSync(path.join(dir,'.gptide-update/journal.json')));context.subscriptions.forEach(s=>s.dispose?.());
+});

@@ -13,7 +13,9 @@ function response(url,{token,signal,accept='application/vnd.github+json'}={},hop
 async function json(url,options={}){const stream=await response(url,options),chunks=[];let bytes=0;try{for await(const chunk of stream){bytes+=chunk.length;if(bytes>8*1024**2)throw Error('更新元数据过大');chunks.push(chunk);}return JSON.parse(Buffer.concat(chunks).toString('utf8'));}finally{stream.destroy();}}
 async function download(url,file,{token,signal,bytes,onProgress=()=>{}}={}){
   if(!Number.isSafeInteger(bytes)||bytes<0||bytes>1024**3)throw Error('更新下载大小无效');
-  const stream=await response(url,{token,signal,accept:'application/octet-stream'});let total=0;const fd=fs.openSync(file,'wx');
-  try{for await(const chunk of stream){total+=chunk.length;if(total>bytes)throw Error('更新下载超出声明大小');fs.writeFileSync(fd,chunk);onProgress(total/bytes);}if(total!==bytes)throw Error('更新下载未完成');}catch(error){fs.closeSync(fd);stream.destroy();try{fs.unlinkSync(file);}catch{}throw error;}fs.closeSync(fd);stream.destroy();
+  const stream=await response(url,{token,signal,accept:'application/octet-stream'});let total=0,fd,created=false;
+  try{fd=fs.openSync(file,'wx');created=true;for await(const chunk of stream){total+=chunk.length;if(total>bytes)throw Error('更新下载超出声明大小');fs.writeFileSync(fd,chunk);onProgress(total/bytes);}if(total!==bytes)throw Error('更新下载未完成');}
+  catch(error){if(fd!==undefined){fs.closeSync(fd);fd=undefined;}if(created)try{fs.unlinkSync(file);}catch{}throw error;}
+  finally{if(fd!==undefined)fs.closeSync(fd);stream.destroy();}
 }
 module.exports={allowed,response,json,download};

@@ -82,7 +82,7 @@ function apply(root,staged,base,next,{beforeWrite=()=>{}}={}) {
   try{
     for(const entry of change.changed){const destination=backup(entry.name);beforeWrite(entry.name);fs.mkdirSync(path.dirname(destination),{recursive:true});const temp=destination+'.gptide-new-'+crypto.randomUUID();fs.copyFileSync(target(staged,entry.name),temp,fs.constants.COPYFILE_EXCL);try{fs.renameSync(temp,destination);}finally{removeFile(temp);}}
     for(const entry of change.removed){const destination=backup(entry.name);beforeWrite(entry.name);fs.unlinkSync(destination);}
-    verify(root,next.files);backup('installation.ini');const ini=fs.readFileSync(path.join(root,'installation.ini'),'utf8');fs.writeFileSync(path.join(root,'installation.ini'),ini.replace(/^Version=.*$/m,'Version='+next.version));backup('gptide-release.json');atomic(path.join(root,'gptide-release.json'),next);journal.committed=true;atomic(path.join(folder,'journal.json'),journal);recover(root);
+    verify(root,next.files);backup('installation.ini');const ini=fs.readFileSync(path.join(root,'installation.ini'),'utf8');fs.writeFileSync(path.join(root,'installation.ini'),ini.replace(/^Version=.*$/m,'Version='+next.version));backup('gptide-release.json');atomic(path.join(root,'gptide-release.json'),next);atomic(path.join(folder,'journal.json'),{...journal,committed:true});journal.committed=true;recover(root);
   }catch(error){if(journal.committed)return {...change,cleanupPending:true};try{recover(root);}catch(rollback){throw Error(error.message+'；恢复未完成：'+rollback.message);}throw error;}
   return change;
 }

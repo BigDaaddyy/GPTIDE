@@ -61,8 +61,8 @@ async function save(root, raw) {
   writes.set(key, task); task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {}); return task;
 }
 async function writeCache(root, result) {
-  await fs.mkdir(require('./data-paths.cjs').dataRoot(root), { recursive: true });
-  const target = path.join(root, 'data', 'usage.json'), temp = target + '.' + require('node:crypto').randomUUID() + '.tmp';
+  const target = path.join(require('./data-paths.cjs').dataRoot(root), 'usage.json'), temp = target + '.' + require('node:crypto').randomUUID() + '.tmp';
+  await fs.mkdir(path.dirname(target), { recursive: true });
   try { await fs.writeFile(temp, JSON.stringify(result)); await fs.rename(temp, target); changes.emit('change', path.resolve(root)); } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
 }
 function label(w) { return w?.windowDurationMins === 10080 ? '每周' : w?.windowDurationMins === 300 ? '5 小时' : w?.windowDurationMins ? `${w.windowDurationMins} 分钟` : '用量窗口'; }

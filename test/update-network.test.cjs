@@ -12,3 +12,9 @@ test('download rejects excess bytes and cleans partial files',async t=>{
 test('unsafe redirects, HTTP failures and cancellation never become update content',async t=>{
   mock(t,[{status:302,headers:{location:'https://evil.example/download'}},{status:404}]);await assert.rejects(network.response('https://api.github.com/asset'),/不受信任/);await assert.rejects(network.json('https://api.github.com/asset'),error=>error.status===404);const controller=new AbortController();controller.abort();await assert.rejects(network.json('https://api.github.com/asset',{signal:controller.signal}),error=>error.name==='AbortError');
 });
+
+test('failure to create the destination closes the response and preserves the existing file',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-net-open-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const file=path.join(dir,'existing');fs.writeFileSync(file,'keep');const old=https.get;let stream;
+  https.get=(url,options,callback)=>{const req=new EventEmitter();req.setTimeout=()=>req;queueMicrotask(()=>{stream=new Readable({read(){}});stream.statusCode=200;stream.headers={};callback(stream);});return req;};t.after(()=>{https.get=old;});
+  await assert.rejects(network.download('https://api.github.com/asset',file,{bytes:3}),error=>error.code==='EEXIST');assert.equal(stream.destroyed,true);assert.equal(fs.readFileSync(file,'utf8'),'keep');
+});

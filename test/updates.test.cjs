@@ -54,3 +54,14 @@ test('transaction cleanup handles Chinese paths without following links or escap
   assert.throws(()=>core.removeTree(root,'..'),/越界/);assert.throws(()=>core.removeTree(root,'.'),/越界/);
   const outside=path.join(f.root,'outside');fs.mkdirSync(outside);put(outside,'keep','keep');fs.mkdirSync(path.join(root,'.gptide-update'));fs.symlinkSync(outside,path.join(root,'.gptide-update/link'),process.platform==='win32'?'junction':'dir');core.removeTree(root,'.gptide-update');assert.equal(fs.readFileSync(path.join(outside,'keep'),'utf8'),'keep');
 });
+
+test('failure to persist the commit marker rolls back rather than reporting success',t=>{
+  const f=fixture(t),base=manifest('1.9.0',[put(f.installed,'app/a','old')]),next=manifest('1.9.1',[put(f.staged,'app/a','new')]);fs.writeFileSync(path.join(f.installed,'gptide-release.json'),JSON.stringify(base));fs.writeFileSync(path.join(f.installed,'installation.ini'),'Version=1.9.0');
+  const rename=fs.renameSync;fs.renameSync=(from,to)=>{if(path.basename(to)==='journal.json'&&JSON.parse(fs.readFileSync(from,'utf8')).committed)throw Error('commit disk failure');return rename(from,to);};
+  try{assert.throws(()=>core.apply(f.installed,f.staged,base,next),/commit disk failure/);}finally{fs.renameSync=rename;}
+  core.verify(f.installed,base.files);assert.equal(JSON.parse(fs.readFileSync(path.join(f.installed,'gptide-release.json'))).version,base.version);assert.equal(fs.existsSync(path.join(f.installed,'.gptide-update')),false);
+});
+
+test('worker preflight failures always persist a result for the waiting editor',async t=>{
+  const f=fixture(t),result=path.join(f.root,'result.json');await require('../tools/update-worker.cjs').run({root:f.installed,result,args:[],base:{schema:0}});const value=JSON.parse(fs.readFileSync(result));assert.equal(value.ok,false);assert.match(value.error,/清单/);
+});

@@ -17,17 +17,22 @@ async function wait(check,label){for(let i=0;i<120;i++){const value=await check(
   const env={...process.env,APPDATA:path.join(testRoot,'Roaming'),USERPROFILE:home,GPTIDE_DATA_HOME:data,GPTIDE_EXTENSIONS_HOME:extensions,CODEX_HOME:path.join(testRoot,'empty-codex')};delete env.ELECTRON_RUN_AS_NODE;
   const helper=path.join(testRoot,'helper');fs.mkdirSync(helper);for(const name of ['update-core.cjs','update-worker.cjs'])fs.copyFileSync(path.join(installed,'tools',name),path.join(helper,name));fs.copyFileSync(path.join(installed,'runtime/node.exe'),path.join(helper,'node.exe'));
   await execute(path.join(helper,'node.exe'),[path.join(helper,'update-worker.cjs'),plan],{env,windowsHide:true,timeout:180000});assert.equal(JSON.parse(fs.readFileSync(result)).ok,true);
-  const {playwright}=require('./acceptance-env.cjs');let browser;
-  try{
+  const {playwright}=require('./acceptance-env.cjs');
+  async function inspectRestart(screenshot){let browser;try{
     browser=await wait(async()=>{try{return await playwright.chromium.connectOverCDP('http://127.0.0.1:'+port,{timeout:1000});}catch{return null;}},'更新后重启');
-    const page=await wait(()=>browser.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('workbench')),'编辑器窗口');await page.waitForSelector('.monaco-workbench');await page.waitForSelector('.gptide-home');await page.screenshot({path:path.join(testRoot,'updated-home.png')});
+    const page=await wait(()=>browser.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('workbench')),'编辑器窗口');await page.waitForSelector('.monaco-workbench');await page.waitForSelector('.gptide-home');await page.screenshot({path:path.join(testRoot,screenshot)});
     const session=await browser.newBrowserCDPSession();await Promise.race([session.send('Browser.close').catch(()=>{}),sleep(2000)]);
-  }finally{if(browser)await Promise.race([browser.close().catch(()=>{}),sleep(2000)]);}
+  }finally{if(browser)await Promise.race([browser.close().catch(()=>{}),sleep(2000)]);}}
+  await inspectRestart('updated-home.png');
   core.verify(installed,next.files);assert.equal(fs.existsSync(path.join(installed,'assets/icon.png')),false);assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);assert.equal(JSON.parse(fs.readFileSync(path.join(installed,'gptide-release.json'))).version,'99.0.0');
   const rollback={...next,version:'99.0.1',files:next.files.map(f=>({...f}))},failure=path.join(testRoot,'failure');fs.mkdirSync(failure);
   for(const name of ['README.md','package.json']){const value=fs.readFileSync(path.join(installed,name),'utf8')+'\n';fs.writeFileSync(path.join(failure,name),value);Object.assign(rollback.files.find(f=>f.name===name),{bytes:Buffer.byteLength(value),sha256:core.hash(path.join(failure,name))});}
   await wait(()=>{try{core.recover(installed);return true;}catch{return false;}},'清理已提交更新事务');
   let writes=0;assert.throws(()=>core.apply(installed,failure,next,rollback,{beforeWrite:()=>{if(++writes===2)throw Error('fixture failure');}}),/fixture failure/);core.verify(installed,next.files);assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);
+  const crashPlan=path.join(testRoot,'crash-plan.json');fs.writeFileSync(crashPlan,JSON.stringify({root:installed,stage:failure,base:next,next:rollback}));
+  let crashed=false;try{await execute(path.join(helper,'node.exe'),['-e',"const c=require(process.argv[1]),p=JSON.parse(require('node:fs').readFileSync(process.argv[2],'utf8'));let n=0;c.apply(p.root,p.stage,p.base,p.next,{beforeWrite:()=>{if(++n===2)process.exit(23);}});",path.join(helper,'update-core.cjs'),crashPlan],{windowsHide:true,env});}catch(error){assert.equal(error.code,23);crashed=true;}assert.equal(crashed,true);
+  const recoveryResult=path.join(testRoot,'recovery-result.json'),recoveryPlan=path.join(testRoot,'recovery-plan.json');fs.writeFileSync(recoveryPlan,JSON.stringify({root:installed,recoverOnly:true,args:JSON.parse(fs.readFileSync(plan)).args,result:recoveryResult}));
+  await execute(path.join(helper,'node.exe'),[path.join(helper,'update-worker.cjs'),recoveryPlan],{windowsHide:true,env,timeout:180000});assert.equal(JSON.parse(fs.readFileSync(recoveryResult)).recovered,true);core.verify(installed,next.files);await inspectRestart('recovered-home.png');
   await sleep(1500);await execute(path.join(installed,'Uninstall.exe'),['/S',`_?=${installed}`],{windowsHide:true,timeout:180000});await wait(()=>!fs.existsSync(path.join(installed,'app')),'卸载测试安装');assert.equal(JSON.parse(fs.readFileSync(marker)).fixture,true);
-  const report={version,testRoot,changedFiles:changes.changed.length,removedFiles:changes.removed.length,bundleBytes:fs.statSync(archive).size,realWorker:true,restartedGUI:true,rollback:true,userDataPreserved:true};fs.writeFileSync(path.join(output,'update-check.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+  const report={version,testRoot,changedFiles:changes.changed.length,removedFiles:changes.removed.length,bundleBytes:fs.statSync(archive).size,realWorker:true,restartedGUI:true,rollback:true,crashedHelperRecovered:true,recoveryRestartedGUI:true,userDataPreserved:true};fs.writeFileSync(path.join(output,'update-check.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 })().catch(error=>{console.error(error);process.exitCode=1;});

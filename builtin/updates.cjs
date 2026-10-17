@@ -9,16 +9,40 @@ function selectDelta(core,release,update,base){
   if(!/^GPTIDE-Update-\d+\.\d+\.\d+-to-\d+\.\d+\.\d+\.bin\.gz$/.test(item.name))throw Error('增量包名称无效');
   const file=asset(release,item.name);if(file.digest!=='sha256:'+item.sha256||file.size!==item.bytes)throw Error('增量包发布校验不一致');return {item,file};
 }
+function restartArgs(workspace,locations){
+  const args=['--user-data-dir',locations.data,'--shared-data-dir',path.join(locations.data,'shared'),'--extensions-dir',locations.extensions,'--new-window','--skip-welcome'];
+  if(workspace.workspaceFile){if(workspace.workspaceFile.scheme!=='file')throw Error('请先保存当前工作区，再重启更新');args.push(workspace.workspaceFile.fsPath);}
+  else for(const folder of workspace.workspaceFolders||[]){if(folder.uri.scheme==='file')args.push(folder.uri.fsPath);else args.push('--folder-uri',folder.uri.toString());}
+  return args;
+}
 function install(vscode,context,root,isBusy=()=>false){
   const core=require(path.join(root,'tools/update-core.cjs'));let checking=false,installing=false,pollTimer;
   context.subscriptions.push({dispose:()=>clearInterval(pollTimer)});
   const bar=vscode.window.createStatusBarItem('gptide.updates',vscode.StatusBarAlignment.Right,47);bar.name='GPTIDE 更新';bar.command='gptide.checkForUpdates';context.subscriptions.push(bar);
   const pending=context.globalState.get('gptide.pendingUpdate');
-  if(pending?.result)try{const outcome=JSON.parse(fs.readFileSync(pending.result,'utf8'));vscode.window[outcome.ok?'showInformationMessage':'showErrorMessage'](outcome.ok?'GPTIDE 已更新至 '+outcome.version:'更新未完成：'+outcome.error);context.globalState.update('gptide.pendingUpdate',undefined);}catch{}
+  if(pending?.result)try{const outcome=JSON.parse(fs.readFileSync(pending.result,'utf8'));vscode.window[outcome.ok?'showInformationMessage':'showErrorMessage'](outcome.ok?'GPTIDE 已'+(outcome.recovered?'恢复至 ':'更新至 ')+outcome.version:'更新未完成：'+outcome.error);context.globalState.update('gptide.pendingUpdate',undefined);}catch{}
+  const journalFile=path.join(root,'.gptide-update/journal.json');
+  if(fs.existsSync(journalFile)){bar.text='$(warning) 恢复更新';bar.tooltip='检测到未清理的更新事务，点击检查并恢复';bar.show();}
+  const newFolder=()=>{const folder=path.join(require('./data-paths.cjs').locations().data,'updates',crypto.randomUUID());fs.mkdirSync(folder,{recursive:true});return folder;};
+  async function restart(folder,prepared){
+    const args=restartArgs(vscode.workspace,require('./data-paths.cjs').locations());
+    for(const name of ['update-core.cjs','update-worker.cjs'])fs.copyFileSync(path.join(root,'tools',name),path.join(folder,name));fs.copyFileSync(path.join(root,'runtime/node.exe'),path.join(folder,'node.exe'));
+    const result=path.join(folder,'result.json'),plan=path.join(folder,'plan.json');fs.writeFileSync(plan,JSON.stringify({root,...prepared,args,result}));await context.globalState.update('gptide.pendingUpdate',{result});
+    const child=spawn(path.join(folder,'node.exe'),[path.join(folder,'update-worker.cjs'),plan],{detached:true,stdio:'ignore',windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined}});
+    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();installing=true;
+    pollTimer=setInterval(()=>{try{const outcome=JSON.parse(fs.readFileSync(result));clearInterval(pollTimer);installing=false;context.globalState.update('gptide.pendingUpdate',undefined);if(!outcome.ok)vscode.window.showErrorMessage('更新未完成：'+outcome.error);}catch{}},2000);pollTimer.unref?.();
+    await vscode.commands.executeCommand('workbench.action.quit');
+  }
   async function check(){
     if(checking||installing)return;checking=true;
     let folder;
     try{
+      if(isBusy()){await vscode.window.showInformationMessage('请先等待当前 Agent 任务结束，再更新');return;}
+      if(fs.existsSync(journalFile)){
+        const journal=JSON.parse(fs.readFileSync(journalFile));if(journal.schema!==1||!Array.isArray(journal.entries))throw Error('更新恢复记录无效');
+        if(!journal.committed){const choice=await vscode.window.showInformationMessage('上次更新未完成，需要退出编辑器后恢复原版本。','退出并恢复');if(choice){if(isBusy())throw Error('Agent 正在工作，请稍后恢复');folder=newFolder();await restart(folder,{recoverOnly:true});}return;}
+        core.recover(root);bar.hide();
+      }
       const controller=new AbortController();
       const prepared=await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'检查 GPTIDE 更新',cancellable:true},async(progress,cancel)=>{
         const listener=cancel.onCancellationRequested(()=>controller.abort());if(cancel.isCancellationRequested)controller.abort();
@@ -33,7 +57,7 @@ function install(vscode,context,root,isBusy=()=>false){
           if(!fs.existsSync(baseline)||!fs.existsSync(path.join(root,'installation.ini'))){const action=await vscode.window.showInformationMessage('当前安装尚不支持增量更新，请安装一次新版完整安装包','打开下载页');if(action)await vscode.env.openExternal(vscode.Uri.parse(RELEASES));return null;}
           const base=core.validateInstalled(JSON.parse(fs.readFileSync(baseline)));if(base.version!==current)throw Error('安装清单版本不一致，请使用完整安装包修复');
           const manifestAsset=asset(release,'update-manifest.json');if(manifestAsset.size>8*1024**2)throw Error('更新清单过大');
-          folder=path.join(require('./data-paths.cjs').locations().data,'updates',crypto.randomUUID());fs.mkdirSync(folder,{recursive:true});
+          folder=newFolder();
           const manifestFile=path.join(folder,'update-manifest.json');await network.download(API+'/releases/assets/'+manifestAsset.id,manifestFile,{token,signal:controller.signal,bytes:manifestAsset.size});if('sha256:'+core.hash(manifestFile)!==manifestAsset.digest)throw Error('更新清单校验失败');
           const update=JSON.parse(fs.readFileSync(manifestFile)),delta=selectDelta(core,release,update,base);
           if(!delta){const action=await vscode.window.showInformationMessage('没有适用于当前版本的增量包，可使用完整安装包更新','打开下载页');if(action)await vscode.env.openExternal(vscode.Uri.parse(RELEASES));return null;}
@@ -47,19 +71,12 @@ function install(vscode,context,root,isBusy=()=>false){
         }finally{listener.dispose();}
       });
       if(!prepared)return;
-      if(isBusy()){await vscode.window.showInformationMessage('更新已下载，请等待当前 Agent 任务结束后再次检查更新');return;}
+      if(isBusy()){await vscode.window.showInformationMessage('Agent 任务已开始，本次更新已取消；任务结束后可重试');return;}
       const choice=await vscode.window.showInformationMessage('更新已准备好。退出所有 GPTIDE 窗口后会安装并重新打开；未保存的文件仍会提示保存。','重启更新');if(!choice)return;if(isBusy())throw Error('Agent 任务正在运行，请稍后更新');
-      for(const name of ['update-core.cjs','update-worker.cjs'])fs.copyFileSync(path.join(root,'tools',name),path.join(folder,name));fs.copyFileSync(path.join(root,'runtime/node.exe'),path.join(folder,'node.exe'));
-      const locations=require('./data-paths.cjs').locations(),args=['--user-data-dir',locations.data,'--shared-data-dir',path.join(locations.data,'shared'),'--extensions-dir',locations.extensions,'--new-window','--skip-welcome'];
-      const project=vscode.workspace.workspaceFolders?.[0]?.uri;if(project?.scheme==='file')args.push(project.fsPath);
-      const result=path.join(folder,'result.json'),plan=path.join(folder,'plan.json');fs.writeFileSync(plan,JSON.stringify({root,...prepared,args,result}));await context.globalState.update('gptide.pendingUpdate',{result});
-      const child=spawn(path.join(folder,'node.exe'),[path.join(folder,'update-worker.cjs'),plan],{detached:true,stdio:'ignore',windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined}});
-      await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();installing=true;
-      pollTimer=setInterval(()=>{try{const outcome=JSON.parse(fs.readFileSync(result));clearInterval(pollTimer);installing=false;context.globalState.update('gptide.pendingUpdate',undefined);if(!outcome.ok)vscode.window.showErrorMessage('更新未完成：'+outcome.error);}catch{}},2000);pollTimer.unref?.();
-      await vscode.commands.executeCommand('workbench.action.quit');
+      await restart(folder,prepared);
     }catch(error){if(error.name!=='AbortError')await vscode.window.showErrorMessage('更新未完成：'+error.message+'。可使用完整安装包更新。');}
     finally{checking=false;if(folder&&!installing){try{core.removeTree(path.dirname(folder),path.basename(folder));}catch{}}}
   }
   context.subscriptions.push(vscode.commands.registerCommand('gptide.checkForUpdates',check));
 }
-module.exports={install,newer,asset,selectDelta};
+module.exports={install,newer,asset,selectDelta,restartArgs};

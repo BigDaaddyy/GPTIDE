@@ -49,3 +49,9 @@ test('cache writes stay ordered and only notify listeners after persistence', as
     listener.dispose(); await usage.save(root, { primary: { usedPercent: 30 } }); assert.equal(events.length, 2);
   } finally { listener.dispose(); await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test('installed usage writes to the configured user directory without needing program data',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'gptide-installed-usage-')),previous=process.env.GPTIDE_DATA_HOME;process.env.GPTIDE_DATA_HOME=path.join(root,'profile');
+  try{const program=path.join(root,'program');await fs.mkdir(program);await usage.save(program,{primary:{usedPercent:35}});const cache=await usage.read(program,path.join(root,'no-codex-sessions'));assert.equal(cache.primary.remainingPercent,65);assert.equal(JSON.parse(await fs.readFile(path.join(root,'profile/usage.json'))).primary.usedPercent,35);await assert.rejects(fs.stat(path.join(program,'data')),error=>error.code==='ENOENT');}
+  finally{if(previous===undefined)delete process.env.GPTIDE_DATA_HOME;else process.env.GPTIDE_DATA_HOME=previous;await fs.rm(root,{recursive:true,force:true});}
+});
