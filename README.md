@@ -1,5 +1,7 @@
 # GPTIDE
 
+[简体中文](README.md) | [English](README.en.md)
+
 想用 GPT 的模型，又习惯了 Cursor 的 IDE，所以做了这个仿 Cursor 的编辑器。
 
 整个项目使用 GPT‑6.1 开发，历时 5 天完成。
