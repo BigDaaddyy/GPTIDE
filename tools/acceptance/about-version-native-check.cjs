@@ -13,10 +13,11 @@ const env = require('../acceptance-env.cjs');
     await page.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'About' }).first().waitFor(); await page.keyboard.press('Enter');
     const dialog = page.locator('.monaco-dialog-box'); await dialog.waitFor();
     const version = require('../../package.json').version, engine = JSON.parse(fs.readFileSync(path.join(env.root, 'app/resources/app/package.json'))).version;
-    const text = await dialog.innerText(); assert.ok(text.includes('Version: ' + version), text); assert.ok(text.includes('VSCodium: ' + engine), text);
+    const text = await dialog.innerText(); assert.ok(text.includes('GPTIDE ' + version), text); assert.ok(text.includes('VSCodium: ' + engine), text);
+    assert.equal(await dialog.getByRole('button', { name: '检查更新', exact: true }).count(), 1);
     await page.screenshot({ path: path.join(qa, 'about-version.png') });
-    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
-    const copied = await app.evaluate(({ clipboard }) => clipboard.readText()); assert.ok(copied.includes('Version: ' + version)); assert.ok(copied.includes('VSCodium: ' + engine));
-    console.log(JSON.stringify({ passed: true, version, engine, copiedBothVersions: true, screenshot: path.join(qa, 'about-version.png') }));
+    await dialog.getByRole('button', { name: '复制', exact: true }).click();
+    const copied = await app.evaluate(({ clipboard }) => clipboard.readText()); assert.ok(copied.includes('GPTIDE ' + version)); assert.ok(copied.includes('VSCodium: ' + engine));
+    console.log(JSON.stringify({ passed: true, version, engine, updateButton: true, copiedBothVersions: true, screenshot: path.join(qa, 'about-version.png') }));
   } finally { if (app) await app.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

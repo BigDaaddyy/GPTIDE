@@ -16,5 +16,5 @@ for (const name of ['vs/workbench/workbench.desktop.main.js','vs/workbench/workb
 }
 const source = fs.readFileSync(path.join(base,'out/vs/workbench/workbench.desktop.main.js'),'utf8');
 if(!fs.readFileSync(path.join(base,'extensions/git/dist/main.js'),'utf8').includes('/* GPTIDE: Git change fallback */'))throw Error('Git 打开更改回退补丁缺失');
-for (const marker of ['/* GPTIDE INLINE START */','/* GPTIDE INLINE END */','/* GPTIDE: compact chat chrome */','/* GPTIDE: relayout chat chrome */','/* GPTIDE: about version */']) if (source.split(marker).length !== 2) throw Error('原生补丁缺失或重复：' + marker);
+for (const marker of ['/* GPTIDE INLINE START */','/* GPTIDE INLINE END */','/* GPTIDE: compact chat chrome */','/* GPTIDE: relayout chat chrome */','/* GPTIDE: about version */','/* GPTIDE: about updates */']) if (source.split(marker).length !== 2) throw Error('原生补丁缺失或重复：' + marker);
 console.log('GPTIDE ' + manifest.version + ' 完整运行包、内置源码、原生校验与产品身份一致');

@@ -27,7 +27,7 @@ Editor data is stored in `%APPDATA%\GPTIDE`, and extensions in `%USERPROFILE%\.g
 
 ## Updates
 
-GPTIDE checks GitHub for updates at startup. You can also check manually through **GPTIDE: 检查更新** in the command palette or the GPTIDE configuration page. When an update is available, GPTIDE asks whether to upgrade and restart or postpone. Only after you agree does it download and install a matching incremental update. Installation waits while tasks are running or changes are unsaved. If no matching update package exists, GPTIDE offers the full installer instead. Updates preserve personal data and stop replacing files if validation fails or installed files have been modified.
+GPTIDE checks GitHub for updates immediately at startup. You can also check manually from **Help → About → 检查更新 (Check for updates)**, through **GPTIDE: 检查更新** in the command palette or the GPTIDE configuration page. When an update is available, GPTIDE asks whether to upgrade and restart or postpone. Only after you agree does it download and install a matching incremental update. Installation waits while tasks are running or changes are unsaved. If no matching update package exists, GPTIDE offers the full installer instead. Updates preserve personal data and stop replacing files if validation fails or installed files have been modified.
 
 For publishing incremental updates, see the [update development guide](UPDATES.md) (Chinese).
 

@@ -921,6 +921,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('gptide.importVSCode', () => require('./vscode-import-ui.cjs').run(vscode, path.resolve(context.extensionPath, '../../../../..'), context.globalStorageUri).catch(e => vscode.window.showErrorMessage(e.message))));
   let chat;
   require('./updates.cjs').install(vscode,context,path.resolve(context.extensionPath,'../../../../..'),()=>!!chat?.actionLocked());
+  require('./about.cjs').install(vscode,context);
   require('./commit-message.cjs').install(vscode,context,()=>chat);
   const settings = require("./settings-ui.cjs").install(vscode, context, path.resolve(context.extensionPath, "../../../../.."), () => chat);
   context.subscriptions.push(vscode.commands.registerCommand('gptide.homeOpenRecent', (uri, workspace, remoteAuthority) => vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.parse(uri), { forceNewWindow: false, ...(remoteAuthority ? { remoteAuthority } : {}) })));

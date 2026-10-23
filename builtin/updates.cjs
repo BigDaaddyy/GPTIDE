@@ -75,6 +75,7 @@ function install(vscode,context,root,isBusy=()=>false){
     let folder,lock;
     try{
       if(isBusy()){if(!automatic)await vscode.window.showInformationMessage('请先等待当前 Agent 任务结束，再更新');return;}
+      bar.text='$(sync~spin) 检查更新';bar.tooltip='正在检查 GitHub 新版本…';bar.show();
       if(fs.existsSync(journalFile)){
         const journal=JSON.parse(fs.readFileSync(journalFile));if(journal.schema!==1||!Array.isArray(journal.entries))throw Error('更新恢复记录无效');
         if(!journal.committed){if(automatic)return;const choice=await vscode.window.showInformationMessage('上次更新未完成，需要退出编辑器后恢复原版本。','退出并恢复');if(choice){if(isBusy())throw Error('Agent 正在工作，请稍后恢复');folder=newFolder();await restart(folder,{recoverOnly:true});}return;}
@@ -125,7 +126,7 @@ function install(vscode,context,root,isBusy=()=>false){
   }
   context.subscriptions.push(vscode.commands.registerCommand('gptide.checkForUpdates',()=>check(false)));
   async function autoCheck(){if(disposed)return;try{if(autoEnabled())await check(true);}finally{if(!disposed){autoTimer=setTimeout(autoCheck,ready||isBusy()?60000:6*60*60*1000);autoTimer.unref?.();}}}
-  if(fs.existsSync(path.join(root,'installation.ini'))){autoTimer=setTimeout(autoCheck,12000);autoTimer.unref?.();}
+  if(fs.existsSync(path.join(root,'installation.ini'))){autoTimer=setTimeout(autoCheck,0);autoTimer.unref?.();}
   return {check,autoCheck};
 }
 module.exports={install,newer,asset,selectDelta,restartArgs,canAutoRestart};

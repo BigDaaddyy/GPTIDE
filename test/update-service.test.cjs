@@ -35,6 +35,17 @@ test('automatic restart waits for agents, unsaved text, notebooks, workspaces an
   vscode.debug.activeDebugSession={};assert.equal(service.canAutoRestart(vscode,()=>false),false);
 });
 
+test('installed startup schedules update checks immediately and disposal cancels the timer', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-startup-update-'));
+  t.after(() => core.removeTree(path.dirname(root), path.basename(root)));
+  fs.mkdirSync(path.join(root, 'tools')); fs.copyFileSync(path.resolve(__dirname, '../tools/update-core.cjs'), path.join(root, 'tools/update-core.cjs')); fs.writeFileSync(path.join(root, 'installation.ini'), '');
+  const previous = global.setTimeout, calls = [], context = { subscriptions: [], globalState: { get: () => undefined } };
+  const vscode = { StatusBarAlignment: { Right: 1 }, window: { createStatusBarItem: () => ({ show() {}, dispose() {} }) }, commands: { registerCommand: () => ({ dispose() {} }) } };
+  try { global.setTimeout = (callback, delay) => { calls.push({ callback, delay }); return { unref() {} }; }; service.install(vscode, context, root); }
+  finally { global.setTimeout = previous; }
+  assert.equal(calls.length, 1); assert.equal(calls[0].delay, 0); context.subscriptions.forEach(value => value.dispose?.());
+});
+
 test('startup checks respect the switch, skip busy tasks and never open a login prompt',async t=>{
   const data=fs.mkdtempSync(path.join(os.tmpdir(),'gptide-auto-update-')),oldData=process.env.GPTIDE_DATA_HOME;process.env.GPTIDE_DATA_HOME=data;t.after(()=>{if(oldData===undefined)delete process.env.GPTIDE_DATA_HOME;else process.env.GPTIDE_DATA_HOME=oldData;core.removeTree(path.dirname(data),path.basename(data));});
   const root=path.resolve(__dirname,'..'),old=network.json;let reads=0,enabled=false,busy=false,prompts=0,errors=0;network.json=async()=>{reads++;throw Object.assign(Error('private'),{status:404});};t.after(()=>{network.json=old;});

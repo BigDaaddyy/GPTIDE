@@ -2,7 +2,7 @@
   "name": "gptide-chat",
   "displayName": "GPTIDE 内置聊天",
   "publisher": "gptide",
-  "version": "1.9.8",
+  "version": "1.9.9",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -120,6 +120,10 @@
       {
         "command": "gptide.checkForUpdates",
         "title": "GPTIDE: 检查更新"
+      },
+      {
+        "command": "gptide.about",
+        "title": "GPTIDE: 关于"
       }
     ],
     "keybindings": [

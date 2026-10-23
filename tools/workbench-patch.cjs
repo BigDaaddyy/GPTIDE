@@ -68,4 +68,11 @@ function aboutVersion(source) {
   const patched = original.replace('let t=i.version;', marker + 'let t=i.gptideVersion||i.version;').replace(result, 'const gptideBase=i.gptideVersion?"\\nVSCodium: "+i.version:"";return{title:i.nameLong,details:n+gptideBase,detailsToCopy:o+gptideBase}');
   return source.slice(0, start) + patched + source.slice(end);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome, gitOpenChange, aboutVersion };
+function aboutUpdates(source) {
+  const marker = '/* GPTIDE: about updates */';
+  if (source.includes(marker)) return source;
+  const anchor = 'run(i){return i.get(Ft).about()}';
+  if (source.split(anchor).length !== 2) throw new Error('原生关于命令结构已变化，请更新检查更新入口补丁');
+  return source.replace(anchor, 'run(i){' + marker + 'return i.get(Ie).executeCommand("gptide.about").catch(()=>i.get(Ft).about())}');
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome, gitOpenChange, aboutVersion, aboutUpdates };
