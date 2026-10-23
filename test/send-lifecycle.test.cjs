@@ -265,6 +265,37 @@ test('Cursor migration retry retains imported background after its first turn fa
   failed = false; await chat.send('retry', 'ask', false); assert.ok(input.includes('Cursor seed')); assert.ok(!input.includes('first try')); assert.equal(copy.backgroundPending, false);
 });
 
+test('Codex continuation starts a separate GPTIDE thread with imported context and preserves its source', async () => {
+  const chat = fixture(), original = chat.chats[0]; original.source = 'codex'; original.messages = [{ role: 'user', text: 'Codex request' }, { role: 'assistant', text: 'Codex progress' }];
+  let input; const calls = [];
+  chat.connect = async () => ({ call: async (method, params) => { calls.push(method); if (method === 'thread/start') return { thread: { id: 'codex-copy' } }; input = params.input[0].text; return { turn: { id: 'ok' } }; } });
+  await chat.send('Continue here', 'ask', false);
+  assert.equal(chat.chats[0].source, 'gptide'); assert.equal(original.source, 'codex'); assert.equal(original.messages.length, 2);
+  assert.ok(input.includes('Codex request')); assert.ok(input.includes('Codex progress')); assert.ok(input.includes('Continue here')); assert.ok(!calls.includes('thread/resume'));
+});
+
+test('Codex refresh retains metadata, excludes hidden and native threads, and drops stale imported rows', async () => {
+  const chat = fixture(), importer = require('../builtin/codex-history.cjs'), previous = importer.load;
+  chat.chats.push({ id: 'codex:stale', source: 'codex', projectKey: 'project', messages: [] });
+  chat.chats[0].threadId = 'native'; chat.hiddenCodexIds = ['codex:hidden']; chat.codexChatMetadata = { 'codex:own': { name: 'Local title', pinned: true, archived: true } };
+  const row = id => ({ id: 'codex:' + id, codexThreadId: id, source: 'codex', projectKey: 'project', name: id, messages: [{ role: 'user', text: id }] });
+  try {
+    importer.load = async () => ({ chats: ['own', 'hidden', 'native'].map(row).concat({ ...row('foreign'), projectKey: 'elsewhere' }), warnings: [] });
+    await chat.importCodex(); assert.deepEqual(chat.chats.map(c => c.id), ['one', 'codex:own']);
+    const imported = chat.chats[1]; assert.equal(imported.name, 'Local title'); assert.equal(imported.pinned, true); assert.equal(imported.archived, true);
+    chat.setHistoryFlag(imported.id, 'pinned', false); assert.equal(chat.codexChatMetadata[imported.id].pinned, false);
+    chat.save = () => false; chat.setHistoryFlag(imported.id, 'pinned', true); assert.equal(imported.pinned, false); assert.equal(chat.codexChatMetadata[imported.id].pinned, false);
+  } finally { importer.load = previous; }
+});
+
+test('history refresh locks sends and tab actions until import finishes and discards closed scopes', async () => {
+  const chat = fixture(); let complete, loaded = false;
+  chat.importCursor = () => new Promise(resolve => { complete = resolve; }); chat.importCodex = async () => { loaded = true; };
+  const pending = chat.importHistory(true); assert.equal(chat.actionLocked(), true);
+  await assert.rejects(chat.send('race', 'ask', false), /正在重新读取/); assert.equal(chat.busy, false);
+  chat.invalidated = true; complete(); await pending; assert.equal(loaded, false); assert.equal(chat.refreshingHistory, false);
+});
+
 test('sending reads fixed project context fresh and preserves it after acknowledgment', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gptide-fixed-send-'));
   try {

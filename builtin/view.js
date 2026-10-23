@@ -81,7 +81,7 @@ function renderHistory() {
   el('history-archived').setAttribute('aria-pressed',String(historyArchived));el('history-archived').textContent=historyArchived?'返回对话':'Archived';
   if(!chats.length)list.append(make('div','history-empty',search?'没有匹配的对话':historyArchived?'没有归档对话':'这个项目还没有聊天记录'));
   for(const chat of chats){
-    const row=make('div','history-row'+(state.activeId===chat.id?' active':'')),open=make('button','history-open'),name=make('span','name',(chat.pinned?'⌖ ':'')+chat.name),meta=make('span','meta',(chat.hasDraft?'草稿':chat.source==='cursor'?'Cursor':'GPTIDE')+' · '+chat.count+' 条消息'),actions=make('div','history-actions'),menu=make('div','history-item-menu');menu.hidden=true;open.append(name,meta);
+    const row=make('div','history-row'+(state.activeId===chat.id?' active':'')),open=make('button','history-open'),name=make('span','name',(chat.pinned?'⌖ ':'')+chat.name),meta=make('span','meta',(chat.hasDraft?'草稿':chat.source==='cursor'?'Cursor':chat.source==='codex'?'Codex':'GPTIDE')+' · '+chat.count+' 条消息'),actions=make('div','history-actions'),menu=make('div','history-item-menu');menu.hidden=true;open.append(name,meta);
     row.dataset.chatId=chat.id;open.dataset.historyAction='open';const locked=!!(state.operationLocked||state.busy||state.storageBlocked);open.disabled=locked;
     open.onclick=()=>{flushDraft();if(chat.id!==state.activeId)beginTabChange();post('select',{id:chat.id});closeHistory();};
     const action=(label,title,type,value)=>{const button=make('button','history-action',label);button.dataset.historyAction=type||'options';button.title=title;button.setAttribute('aria-label',title);button.disabled=locked;button.onclick=()=>{flushDraft();post(type,{id:chat.id,value});};actions.append(button);return button;};
@@ -132,6 +132,7 @@ function renderMessages(s) {
     el('scroll-bottom').hidden = true; return;
   }
   if (s.source === 'cursor' && !box.querySelector('.source')) box.append(make('div', 'source', 'Cursor · 导入记录'));
+  if (s.source === 'codex' && !box.querySelector('.source')) box.append(make('div', 'source', 'Codex · 导入记录'));
   if (s.branch && !box.querySelector('.branch-source')) box.append(make('div', 'branch-source', `分支自 ${s.branch.name} · 第 ${s.branch.messageIndex + 1} 条消息`));
   const start = messageAnchor === null ? Math.max(0, s.messages.length - visibleMessages) : Math.max(0, messageAnchor - 40);
   const end = messageAnchor === null ? s.messages.length : Math.min(s.messages.length, start + 100);
@@ -153,7 +154,7 @@ function renderMessages(s) {
     if (row) {
       content(row.body, message.text); row.delivery.hidden = message.delivery !== 'unknown'; updateMessageTime(row.time, message.createdAt); row.signature = signature; row.message = message; continue;
     }
-    const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : 'GPTIDE');
+    const item = make('article', 'message ' + message.role), role = make('div', 'role', message.role === 'user' ? '你' : s.source === 'cursor' ? 'Cursor' : s.source === 'codex' ? 'Codex' : 'GPTIDE');
     role.hidden = !roundEnd;
     item.dataset.messageIndex = String(index);
     item.dataset.roundEnd = String(roundEnds[index]);
@@ -303,7 +304,7 @@ for (const id of ['new', 'refresh', 'rename', 'delete', 'model', 'effort', 'fold
   el('restore-request').disabled = !s.canRestore || !!el('input').value.trim() || s.storageBlocked; el('restore-request').title = '只取回草稿，不发送；当前草稿需为空';
   el('recover-connect').disabled = !!s.operationLocked || !!s.reviewBusy || !!s.storageBlocked;
   el('mode').disabled = !!s.reviewBusy || !!s.storageBlocked || !!s.loadingScope;
-  el('enqueue').hidden = !s.busy || s.loadingScope || s.source === 'cursor'; el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
+  el('enqueue').hidden = !s.busy || s.loadingScope || ['cursor','codex'].includes(s.source); el('enqueue').disabled = pendingSend || s.reviewBusy || s.storageBlocked;
   renderQueue(s);
   const selectionModels=s.modelChoices||s.models;
   const options = JSON.stringify([selectionModels, s.model, s.effort, s.preferences?.autoConnect]);
@@ -393,7 +394,7 @@ function syncSend(){
   el('input').placeholder = state.busy ? state.canSteer ? '追加指令，Enter 发送 · Alt+Enter 排队' : '任务准备中，可先加入队列' : '输入指令，/ 操作，@ 引用';
   el('stop').hidden = !append; el('stop').disabled = !state.busy || !!state.loadingScope;
   el('enqueue').disabled = pendingSend || !text || !!state.loginPending || !!state.inlineBusy || !!state.reviewBusy || !!state.storageBlocked;
-  el('send').disabled=!!state.loginPending||!!state.inlineBusy||!!state.reviewBusy||!!state.storageBlocked||!!state.loadingScope||pendingTabChange||(pendingSend&&!pendingQueue)||(!state.busy&&!text);
+  el('send').disabled=!!state.refreshingHistory||!!state.loginPending||!!state.inlineBusy||!!state.reviewBusy||!!state.storageBlocked||!!state.loadingScope||pendingTabChange||(pendingSend&&!pendingQueue)||(!state.busy&&!text);
 }
 function jumpToLatest() { messageAnchor = null; visibleMessages = 100; renderMessages(state); updateFind(false); const box = el('messages'); box.scrollTop = box.scrollHeight; el('scroll-bottom').hidden = true; }
 function resizeInput() { syncSend();el('restore-request').disabled = !!el('input').value.trim() || !state.canRestore || !!state.storageBlocked; el('input').style.height = 'auto'; el('input').style.height = Math.min(200, Math.max(34, el('input').scrollHeight)) + 'px'; if (draftKey !== undefined) { if (drafts[draftKey] !== el('input').value) draftTimes[draftKey] = Date.now(); drafts[draftKey] = el('input').value; } projectStates[projectKey] = { drafts, draftTimes, mode: el('mode').value }; api.setState({ projects: projectStates, legacy: legacyState }); }
@@ -452,7 +453,7 @@ el('send').onclick = () => {
   const text = el('input').value.trim(); if (text) { flushDraft(); closeQuickActions(); jumpToLatest(); pendingSend = true; el('send').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post(state.busy ? state.canSteer ? 'steer' : 'enqueue' : 'send', { text, mode: el('mode').value, clientSendId: submittedSendId }); }
 };
 el('enqueue').onclick = () => {
-  if (pendingSend || !state.busy || state.loadingScope || state.storageBlocked || state.source === 'cursor') return;
+  if (pendingSend || !state.busy || state.loadingScope || state.storageBlocked || ['cursor','codex'].includes(state.source)) return;
   const text = el('input').value.trim(); if (!text) return;
   flushDraft(); closeQuickActions(); jumpToLatest(); pendingSend = true; pendingQueue = true; el('enqueue').disabled = true; submittedDraft = el('input').value; submittedInputRevision = inputRevision; submittedSendId = sendPrefix + '-' + (++sendSequence); post('enqueue', { text, mode: el('mode').value, clientSendId: submittedSendId });
 };

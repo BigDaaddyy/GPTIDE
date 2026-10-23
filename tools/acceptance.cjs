@@ -7,6 +7,7 @@ const scenarios = [
   ['home', 'home-check.cjs'], ['offline', 'offline-check.cjs'], ['sidebar', 'sidebar-check.cjs'],
   ['isolation', 'project-isolation-native-check.cjs'],
   ['import', 'import-native-check.cjs'],
+  ['codex-history', 'codex-history-native-check.cjs'],
   ['settings', 'settings-context-native-check.cjs'], ['drafts', 'draft-ui-check.cjs'], ['branches', 'branch-native-check.cjs'],
   ['keyboard','keyboard-native-check.cjs'],
   ['code','code-native-check.cjs'],

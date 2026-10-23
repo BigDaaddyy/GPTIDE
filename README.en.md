@@ -14,12 +14,14 @@ Built on VSCodium, with an integrated ChatGPT / Codex coding assistant. Open a p
 
 On Windows, download the installer from [Releases](https://github.com/BigDaaddyy/GPTIDE/releases), or run `启动GPTIDE.cmd` from a prepared local build. Open a project folder, then sign in to ChatGPT through the account menu in the upper-right corner. GPTIDE uses the models and quota available to your account; no API key is required. Available models and limits depend on what your account reports.
 
-- Project-specific conversations, multiple tabs, pinning and archiving, and access to locally stored Cursor project conversations.
+- Project-specific conversations, multiple tabs, pinning and archiving, and access to locally stored Cursor / Codex project conversations.
 - Agent code changes, selection rewriting, file diffs, and Undo / Keep controls.
 - Model and reasoning effort selection, approval settings, and quick access to usage information.
 - Import VS Code settings and extensions, with familiar editing, terminal, and Git workflows.
 
 Usage information comes from the local cache and includes its last update time. Refreshing usage does not automatically send a model request.
+
+Opening a project automatically reads local Codex sessions from `CODEX_HOME` (default: `~/.codex`). Use “更多操作 → 重新读取项目进度” (More → Reload project progress) in the chat toolbar to read them again. Only turns whose actual project path matches are shown. Continuing an imported conversation creates a GPTIDE conversation with its history as background, preserving the original Codex / Cursor records.
 
 Editor data is stored in `%APPDATA%\GPTIDE`, and extensions in `%USERPROFILE%\.gptide\extensions`. Legacy project-local `data` directories are migrated by copying, leaving the originals intact. On first launch after installation, you can choose to import VS Code / Cursor settings, keybindings, snippets, and extensions. Uninstalling preserves personal data.
 
