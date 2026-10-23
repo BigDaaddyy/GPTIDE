@@ -58,4 +58,14 @@ function gitOpenChange(source){
   if(source.split(target).length!==2)throw new Error('原生 Git 打开更改结构已变化，请更新补丁');
   return source.replace(target,patched);
 }
-module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome, gitOpenChange };
+function aboutVersion(source) {
+  const marker = '/* GPTIDE: about version */';
+  if (source.includes(marker)) return source;
+  const start = source.indexOf('function urr(i,e){let t=i.version;'), end = source.indexOf('var fje=', start);
+  if (start < 0 || end < 0 || end - start > 2000) throw new Error('原生关于窗口结构已变化，请更新版本补丁');
+  const original = source.slice(start, end), result = 'return{title:i.nameLong,details:n,detailsToCopy:o}';
+  if (!original.includes(result)) throw new Error('原生关于窗口返回结构已变化');
+  const patched = original.replace('let t=i.version;', marker + 'let t=i.gptideVersion||i.version;').replace(result, 'const gptideBase=i.gptideVersion?"\\nVSCodium: "+i.version:"";return{title:i.nameLong,details:n+gptideBase,detailsToCopy:o+gptideBase}');
+  return source.slice(0, start) + patched + source.slice(end);
+}
+module.exports = { hideTunnelMenu, gptAccountMenu, homePage, inlineInput, compactChatChrome, gitOpenChange, aboutVersion };
